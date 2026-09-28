@@ -144,8 +144,10 @@ final class ApplicationController {
         case .exclude(let id, let value): mutate { $0.exclude(id, value) }
         case .remove(let id):
             // 실행 중 앱은 다음 관찰에서 다시 추가되지 않도록 제외 상태로 남긴다.
+            // inout 변경 중 runningIDs를 읽으면 같은 catalog를 중첩 접근하므로 먼저 캡처한다.
+            let isRunning = runningIDs.contains(id)
             mutate { value in
-                if runningIDs.contains(id) { value.pin(id, false); value.exclude(id, true) }
+                if isRunning { value.pin(id, false); value.exclude(id, true) }
                 else { value.remove(id) }
             }
         case .move(let offsets, let destination): mutate { $0.move(fromOffsets: offsets, toOffset: destination) }

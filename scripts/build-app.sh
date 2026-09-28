@@ -29,5 +29,5 @@ else
     codesign --force --sign - --timestamp=none "$task_app"
 fi
 codesign --verify --strict "$task_app"
-lipo -verify_arch "$task_arch" "$task_app/Contents/MacOS/MenuBarDock"
+lipo "$task_app/Contents/MacOS/MenuBarDock" -verify_arch "$task_arch"
 printf '\n앱 생성 완료: %s\n' "$task_app"
