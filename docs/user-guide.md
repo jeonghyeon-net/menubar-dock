@@ -1,7 +1,5 @@
 # 사용 안내
 
-개발 중인 **1.0.4**의 사용법입니다. 공개된 **v1.0.3**은 [해당 버전의 사용 안내](https://github.com/jeonghyeon-net/menubar-dock/blob/v1.0.3/docs/user-guide.md)를 참고하세요.
-
 ## 설치와 시작
 
 [최신 릴리스](https://github.com/jeonghyeon-net/menubar-dock/releases/latest)에서 DMG를 다운로드합니다. DMG 안의 **Menu Bar Dock**을 **Applications(응용 프로그램)** 폴더로 드래그한 뒤 실행하세요. 처음 실행하면 설정 창이 열립니다.

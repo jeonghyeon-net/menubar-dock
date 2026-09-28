@@ -42,7 +42,7 @@ Make에서도 `make version`, `make release-test`, `make package-test`, `make re
 
 1. 대상 커밋에 정식 태그가 있으면 그 버전을 사용합니다.
 2. 대상에 태그가 없으면 해당 이력의 가장 높은 버전에서 패치 번호를 1 올립니다.
-3. 정식 태그가 하나도 없으면 대상 커밋의 `Config/Info.plist`에 있는 초기 버전 `1.0.3`을 사용합니다.
+3. 정식 태그가 하나도 없으면 대상 커밋의 `Config/Info.plist`에 있는 초기 버전을 사용합니다.
 
 한 커밋의 여러 정식 버전 태그, 얕은 Git 복제, 범위를 넘는 버전 숫자는 거부합니다. 다른 계보의 태그나 미리 보기 태그는 다음 버전에 영향을 주지 않습니다. 현재는 정식 패치 릴리스만 자동 증가합니다.
 
@@ -50,14 +50,14 @@ Make에서도 `make version`, `make release-test`, `make package-test`, `make re
 
 ## 배포 패키지 생성과 필수 검증
 
-`mise run package`는 기본적으로 `build/`에 앱을, `dist/packages/<버전>/`에 다음 파일을 만듭니다. 아래 `1.0.3`은 첫 릴리스의 예시입니다.
+`mise run package`는 기본적으로 `build/`에 앱을, `dist/packages/<버전>/`에 다음 파일을 만듭니다. 아래는 `1.0.4`의 예시입니다.
 
 ```text
 build/Menu Bar Dock.app
-dist/packages/1.0.3/MenuBarDock-1.0.3-arm64.zip
-dist/packages/1.0.3/MenuBarDock-1.0.3-arm64.dmg
-dist/packages/1.0.3/SHA256SUMS
-dist/packages/1.0.3/release-manifest.json
+dist/packages/1.0.4/MenuBarDock-1.0.4-arm64.zip
+dist/packages/1.0.4/MenuBarDock-1.0.4-arm64.dmg
+dist/packages/1.0.4/SHA256SUMS
+dist/packages/1.0.4/release-manifest.json
 ```
 
 ZIP과 DMG는 같은 앱 스냅샷을 담습니다. DMG에는 `Applications` 바로가기가 있습니다. `SHA256SUMS`에는 각 배포 파일의 SHA-256과 파일명을 기록합니다.
@@ -119,10 +119,10 @@ mise run release
 
 체크섬 확인은 설치에 필요한 단계가 아닙니다. 다운로드한 파일의 무결성을 직접 확인하려는 경우에만 사용합니다. DMG로 설치한다면 ZIP이나 `release-manifest.json`을 추가로 받을 필요가 없습니다.
 
-내려받은 DMG와 **같은 릴리스**의 `SHA256SUMS`를 같은 폴더에 놓고, 터미널에서 그 폴더로 이동합니다. 다음은 `1.0.3` DMG 하나만 검사하는 예시입니다. 파일명은 실제 내려받은 버전으로 바꿉니다.
+내려받은 DMG와 **같은 릴리스**의 `SHA256SUMS`를 같은 폴더에 놓고, 터미널에서 그 폴더로 이동합니다. 다음은 `1.0.4` DMG 하나만 검사하는 예시입니다. 파일명은 실제 내려받은 버전으로 바꿉니다.
 
 ```sh
-awk '$2 == "MenuBarDock-1.0.3-arm64.dmg" { print }' SHA256SUMS | shasum -a 256 -c -
+awk '$2 == "MenuBarDock-1.0.4-arm64.dmg" { print }' SHA256SUMS | shasum -a 256 -c -
 ```
 
 파일명 뒤에 `OK`가 나오면 체크섬이 일치합니다. 오류가 나거나 `OK`가 없으면 파일명과 릴리스 버전을 확인합니다. ZIP을 선택했다면 위 파일명만 해당 ZIP 이름으로 바꾸면 됩니다.
