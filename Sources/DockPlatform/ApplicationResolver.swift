@@ -29,9 +29,13 @@ public final class ApplicationResolver {
         }
         let values = try canonicalURL.resourceValues(forKeys: [.isDirectoryKey])
         guard canonicalURL.pathExtension.lowercased() == "app", values.isDirectory == true,
-              let bundle = Bundle(url: canonicalURL),
-              bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "APPL"
+              let bundle = Bundle(url: canonicalURL)
         else { throw ApplicationResolutionError.invalidApplication }
+        let packageType = bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String
+        // 시스템 Finder만 APPL 대신 FNDR을 사용한다. 다른 FNDR 번들까지 일반 앱으로 허용하지 않는다.
+        let isSystemFinder = packageType == "FNDR" && bundle.bundleIdentifier == "com.apple.finder"
+            && canonicalURL.path == "/System/Library/CoreServices/Finder.app"
+        guard packageType == "APPL" || isSystemFinder else { throw ApplicationResolutionError.invalidApplication }
         guard let executableURL = bundle.executableURL,
               FileManager.default.isExecutableFile(atPath: executableURL.path)
         else { throw ApplicationResolutionError.missingExecutable }

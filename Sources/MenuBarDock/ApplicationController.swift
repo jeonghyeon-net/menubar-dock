@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 final class ApplicationController {
     private var catalog = DockCatalog()
     private let repository: ConfigurationRepository
+    private let readSystemDock: () throws -> [URL]
+    private let systemDockMonitor: SystemDockMonitor?
     private let monitor = WorkspaceMonitor()
     private let resolver = ApplicationResolver()
     private let launcher = ApplicationLauncher()
@@ -27,7 +29,6 @@ final class ApplicationController {
     private var isReadOnly = false
     private var isTerminating = false
     private var pendingShowSettings = false
-    private var pendingSettingsTab: SettingsWindowController.Tab?
     private(set) var started = false
 
     private(set) lazy var presentation = DockPresentationModel(
@@ -39,7 +40,11 @@ final class ApplicationController {
     private var settings: SettingsWindowController?
     private lazy var shortcuts = GlobalShortcutService { [weak self] direction in self?.cycle(direction) }
 
-    init(directory: URL) { repository = ConfigurationRepository(directory: directory) }
+    init(directory: URL, readSystemDock: (() throws -> [URL])? = nil) {
+        repository = ConfigurationRepository(directory: directory)
+        self.readSystemDock = readSystemDock ?? { try SystemDockReader().applicationURLs() }
+        systemDockMonitor = readSystemDock == nil ? SystemDockMonitor() : nil
+    }
 
     func start(showSettings: Bool) async {
         do {
@@ -57,6 +62,12 @@ final class ApplicationController {
         for app in catalog.orderedApps {
             if let refreshed = resolver.refresh(app) { catalog.upsert(refreshed) }
         }
+        for app in catalog.configuration.removedApps {
+            if let refreshed = resolver.refresh(app) { catalog.refreshRemovedApp(refreshed) }
+        }
+        do { try systemDockMonitor?.start { [weak self] in self?.synchronizeSystemDock() } }
+        catch { presentation.notice = "Dock 변경 감지를 시작하지 못했습니다. 앱을 다시 실행해 주세요." }
+        synchronizeSystemDock()
         presentation.isReadOnly = isReadOnly
         switcher = SwitcherController(model: presentation)
         settings = SettingsWindowController(model: presentation)
@@ -65,20 +76,18 @@ final class ApplicationController {
         statusItem = StatusItemController(model: presentation)
         started = true
         if showSettings || pendingShowSettings {
-            settings?.show(tab: pendingSettingsTab)
+            settings?.show()
             pendingShowSettings = false
-            pendingSettingsTab = nil
         }
     }
 
     func showSwitcher() { cycle(1) }
 
-    func showSettings(tab: SettingsWindowController.Tab? = nil) {
+    func showSettings() {
         if let settings {
-            settings.show(tab: tab)
+            settings.show()
         } else {
             pendingShowSettings = true
-            pendingSettingsTab = tab
         }
         refreshLoginStatus()
     }
@@ -121,8 +130,10 @@ final class ApplicationController {
     }
 
     private func refreshLoginStatus() {
-        presentation.loginEnabled = login.isEnabled
-        presentation.loginStatus = login.statusDescription
+        let enabled = login.isEnabled
+        let status = login.statusDescription
+        if presentation.loginEnabled != enabled { presentation.loginEnabled = enabled }
+        if presentation.loginStatus != status { presentation.loginStatus = status }
     }
 
     private func cycle(_ direction: Int) {
@@ -152,14 +163,7 @@ final class ApplicationController {
         case .open(let id): open(id)
         case .pin(let id, let value): mutate { $0.pin(id, value) }
         case .exclude(let id, let value): mutate { $0.exclude(id, value) }
-        case .remove(let id):
-            // 실행 중 앱은 다음 관찰에서 다시 추가되지 않도록 제외 상태로 남긴다.
-            // inout 변경 중 runningIDs를 읽으면 같은 catalog를 중첩 접근하므로 먼저 캡처한다.
-            let isRunning = runningIDs.contains(id)
-            mutate { value in
-                if isRunning { value.pin(id, false); value.exclude(id, true) }
-                else { value.remove(id) }
-            }
+        case .remove(let id): mutate { $0.remove(id) }
         case .move(let offsets, let destination): mutate { $0.move(fromOffsets: offsets, toOffset: destination) }
         case .preferences(let value): mutate { $0.updatePreferences(value) }
         case .addApps: chooseApplications(replacing: nil)
@@ -176,7 +180,6 @@ final class ApplicationController {
             }
         case .reveal(let id): withApp(id) { launcher.reveal($0) }
         case .settings: showSettings()
-        case .appearanceSettings: showSettings(tab: .appearance)
         case .help: showHelp()
         case .quit: NSApp.terminate(nil)
         case .dismissNotice: presentation.notice = nil
@@ -199,6 +202,22 @@ final class ApplicationController {
     private func withApp(_ id: AppID, perform: (AppEntry) -> Void) {
         guard let app = catalog.orderedApps.first(where: { $0.id == id }) else { return }
         perform(app)
+    }
+
+    private func synchronizeSystemDock() {
+        guard !isReadOnly, !isTerminating else { return }
+        do {
+            let urls = try readSystemDock()
+            let previous = catalog.configuration
+            SystemDockCatalogImporter.importApplications(from: urls, into: &catalog) { try resolver.resolve(url: $0) }
+            if previous != catalog.configuration {
+                publish()
+                scheduleSave()
+            }
+        } catch {
+            // 자동 갱신 실패는 기존 목록을 유지하며 다음 파일 변경/시작 때 다시 시도한다.
+            logger.error("macOS Dock 목록 읽기 실패: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func open(_ id: AppID) {
@@ -242,7 +261,9 @@ final class ApplicationController {
                         }
                         app.id = id
                     } else if let match { app.id = match.id }
-                    self.mutate { catalog in catalog.upsert(app); catalog.pin(app.id, true) }
+                    self.mutate { catalog in
+                        if let restoredID = catalog.upsertRestoring(app) { catalog.pin(restoredID, true) }
+                    }
                     self.icons.invalidate()
                 } catch { self.report(error) }
             }
@@ -301,6 +322,7 @@ final class ApplicationController {
     func stop() {
         started = false
         monitor.stop()
+        systemDockMonitor?.stop()
         shortcuts.stop()
         statusItem?.tearDown()
         statusItem = nil
@@ -353,7 +375,9 @@ final class ApplicationController {
     }
 
     private func refreshShortcutLabels() {
-        presentation.forwardShortcut = shortcuts.binding(for: .forward).displayName
-        presentation.backwardShortcut = shortcuts.binding(for: .backward).displayName
+        let forward = shortcuts.binding(for: .forward).displayName
+        let backward = shortcuts.binding(for: .backward).displayName
+        if presentation.forwardShortcut != forward { presentation.forwardShortcut = forward }
+        if presentation.backwardShortcut != backward { presentation.backwardShortcut = backward }
     }
 }

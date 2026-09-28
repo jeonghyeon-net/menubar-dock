@@ -14,7 +14,7 @@ public struct DockCatalog: Sendable {
     }
 
     public mutating func upsert(_ app: AppEntry) {
-        guard !app.id.rawValue.isEmpty else { return }
+        guard !app.id.rawValue.isEmpty, !isRemoved(app) else { return }
         if let index = configuration.apps.firstIndex(where: { $0.id == app.id }) {
             var updated = app
             let previous = configuration.apps[index]
@@ -30,6 +30,44 @@ public struct DockCatalog: Sendable {
         }
     }
 
+    public func isRemoved(_ app: AppEntry) -> Bool {
+        configuration.removedApps.contains { $0.id == app.id || sameInstallation($0, app) }
+    }
+
+    /// 명시적으로 추가한 설치만 삭제 기록에서 복원한다. 기존 ID를 재사용하고 복원 위치는 목록 끝이다.
+    @discardableResult
+    public mutating func upsertRestoring(_ app: AppEntry) -> AppID? {
+        guard !app.id.rawValue.isEmpty else { return nil }
+        let existing = orderedApps.first { $0.id == app.id || sameInstallation($0, app) }
+        let removed = configuration.removedApps.first { $0.id == app.id || sameInstallation($0, app) }
+        var restored = app
+        restored.id = existing?.id ?? removed?.id ?? app.id
+        if let removed {
+            restored.bookmarkData = app.bookmarkData ?? removed.bookmarkData
+            restored.lastSeen = max(app.lastSeen, removed.lastSeen)
+        }
+        configuration.removedApps.removeAll {
+            $0.id == restored.id || $0.id == app.id || sameInstallation($0, app)
+        }
+        upsert(restored)
+        return restored.id
+    }
+
+    /// bookmark로 찾은 새 위치도 삭제 상태로 남겨 자동 관찰이 앱을 되살리지 않게 한다.
+    public mutating func refreshRemovedApp(_ app: AppEntry) {
+        guard let index = configuration.removedApps.firstIndex(where: { $0.id == app.id }) else { return }
+        let previous = configuration.removedApps[index]
+        var refreshed = app
+        refreshed.isPinned = previous.isPinned
+        refreshed.isExcluded = previous.isExcluded
+        refreshed.bookmarkData = app.bookmarkData ?? previous.bookmarkData
+        refreshed.lastSeen = max(app.lastSeen, previous.lastSeen)
+        configuration.removedApps[index] = refreshed
+        let removedIDs = Set(configuration.apps.filter { isRemoved($0) }.map(\.id))
+        configuration.apps.removeAll { removedIDs.contains($0.id) }
+        configuration.order.removeAll { removedIDs.contains($0) }
+    }
+
     public mutating func pin(_ id: AppID, _ isPinned: Bool) {
         guard let index = configuration.apps.firstIndex(where: { $0.id == id }) else { return }
         configuration.apps[index].isPinned = isPinned
@@ -41,9 +79,17 @@ public struct DockCatalog: Sendable {
         configuration.apps[index].isExcluded = isExcluded
     }
 
-    public mutating func remove(_ id: AppID) {
-        configuration.apps.removeAll { $0.id == id }
-        configuration.order.removeAll { $0 == id }
+    public mutating func remove(_ id: AppID, suppressRediscovery: Bool = true) {
+        guard let app = configuration.apps.first(where: { $0.id == id }) else { return }
+        if suppressRediscovery {
+            configuration.removedApps.removeAll { $0.id == id || sameInstallation($0, app) }
+            configuration.removedApps.append(app)
+        }
+        let removedIDs = Set(configuration.apps.filter {
+            $0.id == id || (suppressRediscovery && sameInstallation($0, app))
+        }.map(\.id))
+        configuration.apps.removeAll { removedIDs.contains($0.id) }
+        configuration.order.removeAll { removedIDs.contains($0) }
     }
 
     /// SwiftUI 목록의 이동 계약처럼 삭제 전 배열의 삽입 위치를 받는다.
@@ -60,6 +106,12 @@ public struct DockCatalog: Sendable {
 
     public mutating func updatePreferences(_ preferences: DockPreferences) {
         configuration.preferences = preferences.normalized()
+    }
+
+    public mutating func updateKnownSystemDockPaths(_ paths: [String]) {
+        var seen = Set<String>()
+        configuration.knownSystemDockPaths = paths.filter { !$0.isEmpty }.map(installationPath)
+            .filter { seen.insert($0).inserted }
     }
 
     /// 메뉴 막대의 폭 제한 전 후보다. 숨겨진 초과 항목도 선택 패널에서는 접근할 수 있다.

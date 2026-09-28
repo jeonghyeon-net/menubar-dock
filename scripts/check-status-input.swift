@@ -28,14 +28,12 @@ struct StatusInputCheck {
         }
         var opened: [AppID] = []
         var settingsActions = 0
-        var appearanceActions = 0
         var items: [NSStatusItem] = []
         // 외부 앱이나 설정 창을 실행하지 않는다. production controller가 전달한 명령만 기록한다.
         let model = DockPresentationModel(imageForApp: { NSWorkspace.shared.icon(forFile: $0.bundlePath) }) { action in
             switch action {
             case let .open(id): opened.append(id)
             case .settings: settingsActions += 1
-            case .appearanceSettings: appearanceActions += 1
             default: break
             }
         }
@@ -63,9 +61,11 @@ struct StatusInputCheck {
                 sendClick(button: button, type: .leftMouseDown, sequence: index)
                 guard opened.count == index + 1, opened.last == entry.id else { fail("\(entry.name) 왼클릭 명령 불일치") }
                 let imageSize = button.image?.size ?? .zero
-                guard imageSize.width <= min(button.bounds.width, CGFloat(model.preferences.slotWidth)) - 4,
-                      imageSize.height <= button.bounds.height - 4 else { fail("\(entry.name) 아이콘이 버튼 영역을 벗어남") }
-                print("크기: \(entry.name), 버튼 \(button.bounds.size), 아이콘 \(imageSize), 슬롯 \(model.preferences.slotWidth)")
+                guard imageSize == NSSize(width: model.preferences.iconSize, height: model.preferences.iconSize),
+                      imageSize.width <= button.bounds.width,
+                      imageSize.height <= button.bounds.height else { fail("\(entry.name) 요청 크기 또는 버튼 영역 불일치") }
+                let windowPadding = (button.window?.frame.width ?? button.bounds.width) - button.bounds.width
+                print("크기: \(entry.name), 버튼 \(button.bounds.size), 아이콘 \(imageSize), 슬롯 \(model.preferences.slotWidth), macOS 창 추가 폭 \(windowPadding)pt")
                 buttons.append(button)
             }
             guard opened == entries.map(\.id), popups.began == 0 else { fail("왼클릭에 메뉴 또는 잘못된 앱이 열림") }
@@ -77,11 +77,10 @@ struct StatusInputCheck {
             }
             print("통과: 우클릭 \(entries.count)회 → 실제 NSMenu tracking 시작/종료 → 설정 선택, 앱 실행 없음")
             guard let first = buttons.first else { fail("버튼 없음") }
-            popups.selectionIndex = 1
             sendClick(button: first, type: .leftMouseDown, flags: .control, sequence: entries.count * 2)
             guard popups.began == entries.count + 1, popups.ended == entries.count + 1,
-                  appearanceActions == 1, opened.count == entries.count else { fail("Control 클릭 표시 설정 불일치") }
-            print("통과: Control 클릭 → 실제 메뉴 → 크기 및 간격 선택")
+                  settingsActions == entries.count + 1, opened.count == entries.count else { fail("Control 클릭 설정 불일치") }
+            print("통과: Control 클릭 → 실제 메뉴 → 설정 선택")
             // 접근성 API 호출 뒤 실제 전달된 AppID와 메뉴 개수로 결과를 판정한다.
             _ = first.accessibilityPerformPress()
             guard opened.count == entries.count + 1,
@@ -89,6 +88,11 @@ struct StatusInputCheck {
                 fail("접근성 press가 앱을 열지 않음: 현재 이벤트 \(String(describing: NSApp.currentEvent?.type))")
             }
             print("통과: 접근성 press → 앱 실행, 메뉴 없음")
+            let beforeSizing = opened.count
+            verifyRequestedSizes(model: model, controller: controller, button: first)
+            guard Array(opened.dropFirst(beforeSizing)) == Array(repeating: entries[0].id, count: 5) else {
+                fail("크기 변경 후 왼클릭 대상 불일치")
+            }
             if let path = ProcessInfo.processInfo.environment["MENU_BAR_SNAPSHOT_PATH"] {
                 writeAppearanceSnapshot(buttons: buttons, path: path)
             }
@@ -97,6 +101,40 @@ struct StatusInputCheck {
             exit(0)
         }
         app.run()
+    }
+
+    private static func verifyRequestedSizes(model: DockPresentationModel, controller: StatusItemController, button: NSStatusBarButton) {
+        let original = model.preferences
+        defer { model.preferences = original; controller.update() }
+        model.preferences.slotWidth = 40
+        var areas: [Int] = []
+        for (index, requested) in [16.0, 20.0, 24.0, 28.0, 32.0].enumerated() {
+            model.preferences.iconSize = requested
+            controller.update()
+            sendClick(button: button, type: .leftMouseDown, sequence: 100 + index)
+            guard button.image?.size == NSSize(width: requested, height: requested),
+                  let imageRect = button.cell?.imageRect(forBounds: button.bounds),
+                  imageRect.size == NSSize(width: requested, height: requested), button.bounds.contains(imageRect),
+                  let bitmap = button.bitmapImageRepForCachingDisplay(in: button.bounds) else { fail("요청한 \(requested)pt가 실제 렌더 영역과 다름") }
+            button.cacheDisplay(in: button.bounds, to: bitmap)
+            var opaquePixels = 0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide where (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 {
+                    opaquePixels += 1
+                }
+            }
+            areas.append(opaquePixels)
+            print("크기 회귀: 요청 \(requested)pt, 버튼 \(button.bounds.size), 실제 imageRect \(imageRect), 픽셀 면적 \(opaquePixels)")
+        }
+        guard zip(areas, areas.dropFirst()).allSatisfy({ pair in pair.0 < pair.1 }) else { fail("서로 다른 크기 설정의 실제 픽셀 면적이 증가하지 않음") }
+        model.preferences.slotWidth = 22
+        model.preferences.iconSize = 32
+        controller.update()
+        guard button.bounds.width == 32,
+              button.cell?.imageRect(forBounds: button.bounds).size == NSSize(width: 32, height: 32) else {
+            fail("좁은 슬롯에서 아이콘이 축소되거나 겹침")
+        }
+        print("통과: 16/20/24/28/32pt 실제 픽셀 면적 증가, 크기 변경 후 왼클릭, 좁은 슬롯 자동 확보")
     }
 
     private static func sendClick(button: NSStatusBarButton, type: NSEvent.EventType, flags: NSEvent.ModifierFlags = [], sequence: Int) {

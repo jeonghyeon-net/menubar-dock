@@ -119,6 +119,13 @@ public actor ConfigurationRepository {
         default:
             throw ConfigurationRepositoryError.invalidSchema(version)
         }
+        // 이전 버전은 두 크기를 독립적으로 허용했다. 정상 범위의 조합은 손상 경고 없이
+        // 현재 화면의 추가 간격 0...28pt에 맞추고, 실제 범위 오류는 아래 정규화에서 안내한다.
+        if (16.0...32.0).contains(configuration.preferences.iconSize),
+           (16.0...60.0).contains(configuration.preferences.slotWidth) {
+            let iconSize = configuration.preferences.iconSize
+            configuration.preferences.slotWidth = min(max(configuration.preferences.slotWidth, iconSize), iconSize + 28)
+        }
         let normalized = configuration.normalized()
         return ConfigurationLoadResult(
             configuration: normalized,

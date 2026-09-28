@@ -23,6 +23,7 @@ set -eu
 swift build -Xswiftc -warnings-as-errors
 ./scripts/test.sh
 ./scripts/check-status-input.sh
+./scripts/check-settings-input.sh
 '''
 
 [tasks."input-check"]
@@ -64,3 +65,7 @@ run = "./scripts/notarize.sh"
 [tasks.clean]
 description = "SwiftPM 빌드 캐시 정리"
 run = "swift package clean"
+
+[tasks."settings-input-check"]
+description = "슬라이더를 트랙 밖까지 드래그하며 손잡이 위치와 즉시 반영 검사"
+run = "./scripts/check-settings-input.sh"

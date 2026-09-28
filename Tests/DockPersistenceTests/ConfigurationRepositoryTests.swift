@@ -30,6 +30,119 @@ private func configuration(_ name: String) -> DockConfiguration {
 
 @Suite("설정 저장과 복구")
 struct ConfigurationRepositoryTests {
+    @Test("이전의 정상 크기 조합은 경고 없이 영역을 넓히고 새 조합을 저장한다")
+    func legacyIndependentDimensionsFitWithoutCorruptionWarning() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        try Data(#"{"schemaVersion":2,"preferences":{"iconSize":32,"slotWidth":30}}"#.utf8).write(to: fixture.primary)
+        let result = try await fixture.repository.load()
+        #expect(result.configuration.preferences == DockPreferences(iconSize: 32, slotWidth: 32))
+        #expect(result.warning == nil)
+        try await fixture.repository.save(result.configuration, revision: 1)
+        #expect(try await ConfigurationRepository(directory: fixture.directory).load().configuration == result.configuration)
+    }
+
+    @Test("영역 보정은 음수와 범위 초과 설정의 경고를 숨기지 않는다")
+    func invalidDimensionsStillProduceAWarning() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        try Data(#"{"schemaVersion":2,"preferences":{"iconSize":32,"slotWidth":-1}}"#.utf8).write(to: fixture.primary)
+        let result = try await fixture.repository.load()
+        #expect(result.configuration.preferences == DockPreferences(iconSize: 32, slotWidth: 32))
+        #expect(result.warning != nil)
+    }
+
+    @Test("삭제 기록과 알려진 Dock 경로는 재시작 후에도 유지되며 명시적 추가만 복원한다")
+    func removedAppsAndKnownDockPathsSurviveRoundTrip() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        let initial = configuration("삭제한 앱")
+        let app = try #require(initial.apps.first)
+        var catalog = DockCatalog(configuration: initial)
+        catalog.updateKnownSystemDockPaths([app.bundlePath])
+        catalog.remove(app.id)
+        try await fixture.repository.save(catalog.configuration, revision: 1)
+        let loaded = try await ConfigurationRepository(directory: fixture.directory).load()
+        #expect(loaded.warning == nil)
+        #expect(loaded.configuration.apps.isEmpty)
+        #expect(loaded.configuration.order.isEmpty)
+        #expect(loaded.configuration.removedApps == [app])
+        #expect(loaded.configuration.knownSystemDockPaths == [app.bundlePath])
+
+        var reopened = DockCatalog(configuration: loaded.configuration)
+        var observed = app
+        observed.id = AppID(rawValue: "new-process-resolver-id")
+        reopened.upsert(observed)
+        #expect(reopened.orderedApps.isEmpty)
+        let restoredID = reopened.upsertRestoring(observed)
+        #expect(restoredID == app.id)
+        try await fixture.repository.save(reopened.configuration, revision: 2)
+        let restored = try await ConfigurationRepository(directory: fixture.directory).load().configuration
+        #expect(restored.order == [app.id])
+        #expect(restored.removedApps.isEmpty)
+    }
+
+    @Test("이전 일회성 Dock 가져오기 표시는 알려진 앱 경로로 변환하고 다시 저장하지 않는다")
+    func migratesOneTimeImportMarkerToKnownPaths() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        var original = configuration("사용자가 고정 해제한 앱")
+        original.apps[0].isPinned = false
+        var json = try #require(JSONSerialization.jsonObject(with: encoder.encode(original)) as? [String: Any])
+        json.removeValue(forKey: "knownSystemDockPaths")
+        json.removeValue(forKey: "removedApps")
+        json["hasImportedSystemDock"] = true
+        try JSONSerialization.data(withJSONObject: json).write(to: fixture.primary)
+        let loaded = try await fixture.repository.load()
+        #expect(loaded.warning == nil)
+        #expect(loaded.configuration.apps == original.apps)
+        #expect(loaded.configuration.order == original.order)
+        #expect(loaded.configuration.removedApps.isEmpty)
+        #expect(loaded.configuration.knownSystemDockPaths == original.apps.map(\.bundlePath))
+        try await fixture.repository.save(loaded.configuration, revision: 1)
+        let saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture.primary)) as? [String: Any])
+        #expect(saved["hasImportedSystemDock"] == nil)
+        #expect(saved["knownSystemDockPaths"] as? [String] == original.apps.map(\.bundlePath))
+    }
+
+    @Test("새 Dock 동기화 필드가 없는 기존 설정은 빈 삭제 기록과 빈 경로로 시작한다")
+    func missingDockSynchronizationFieldsUseEmptyCollections() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        try Data(#"{"schemaVersion":2}"#.utf8).write(to: fixture.primary)
+        let loaded = try await fixture.repository.load().configuration
+        #expect(loaded.removedApps.isEmpty)
+        #expect(loaded.knownSystemDockPaths.isEmpty)
+    }
+
+    @Test("명시적으로 빈 최신 Dock 경로는 이전 가져오기 표시보다 우선한다")
+    func explicitKnownPathsOverrideLegacyMarker() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        let original = configuration("이전 Dock 앱")
+        var json = try #require(JSONSerialization.jsonObject(with: encoder.encode(original)) as? [String: Any])
+        json["hasImportedSystemDock"] = true
+        try JSONSerialization.data(withJSONObject: json).write(to: fixture.primary)
+        let loaded = try await fixture.repository.load()
+        #expect(loaded.configuration.knownSystemDockPaths.isEmpty)
+        #expect(loaded.configuration.apps == original.apps)
+        #expect(loaded.warning == nil)
+    }
+
+    @Test("기존·신규 영역은 손상 경고 없이 추가 간격 0...28pt로 맞춘다", arguments: [16.0, 22.0, 30.0, 60.0])
+    func validOldAndNewSlotWidthsDoNotWarn(_ width: Double) async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        try Data("{\"schemaVersion\":2,\"preferences\":{\"iconSize\":16,\"slotWidth\":\(width)}}".utf8).write(to: fixture.primary)
+        let loaded = try await fixture.repository.load()
+        #expect(loaded.warning == nil)
+        #expect(loaded.configuration.preferences.slotWidth == min(width, 44))
+    }
+
     @Test("v2의 과대한 기본값만 조용히 보정하고 사용자 앱과 설정을 보존한다", arguments: [
         (40.0, 24.0, false),
         (28.0, 28.0, false),
@@ -68,13 +181,13 @@ struct ConfigurationRepositoryTests {
         #expect(reopened.warning == nil)
     }
 
-    @Test("v2 크기 필드가 없으면 24pt 아이콘과 30pt 영역을 사용한다")
+    @Test("v2 크기 필드가 없으면 24pt 아이콘과 추가 여백 없는 24pt 영역을 사용한다")
     func currentSchemaMissingDimensionsUseCorrectedDefaults() async throws {
         let fixture = try RepositoryFixture()
         defer { fixture.cleanUp() }
         try Data(#"{"schemaVersion":2,"preferences":{}}"#.utf8).write(to: fixture.primary)
         let result = try await fixture.repository.load()
-        #expect(result.configuration == DockConfiguration(preferences: DockPreferences(iconSize: 24, slotWidth: 30)))
+        #expect(result.configuration == DockConfiguration(preferences: DockPreferences(iconSize: 24, slotWidth: 24)))
         #expect(result.warning == nil)
     }
 
@@ -121,7 +234,7 @@ struct ConfigurationRepositoryTests {
 
     @Test("v1 사용자 크기·간격은 새 범위 안에서 변환한다", arguments: [
         (24.0, 8.0, 24.0, 34.0),
-        (16.0, -100.0, 16.0, 22.0),
+        (16.0, -100.0, 16.0, 16.0),
         (100.0, 100.0, 32.0, 60.0),
     ])
     func legacyCustomDimensionsAreMappedAndBounded(_ values: (Double, Double, Double, Double)) async throws {
@@ -135,7 +248,7 @@ struct ConfigurationRepositoryTests {
         #expect(!result.isReadOnly)
     }
 
-    @Test("형식 번호나 선택 설정이 없던 v1 파일에도 새 기본값을 적용한다", arguments: [
+    @Test("형식 번호나 선택 설정이 없던 v1 파일은 기존 간격을 변환한다", arguments: [
         #"{"schemaVersion":1}"#,
         #"{"preferences":{"iconSize":18,"iconSpacing":4,"isCompact":true}}"#,
     ])
@@ -143,7 +256,7 @@ struct ConfigurationRepositoryTests {
         let fixture = try RepositoryFixture()
         defer { fixture.cleanUp() }
         try Data(json.utf8).write(to: fixture.primary)
-        #expect(try await fixture.repository.load().configuration == DockConfiguration())
+        #expect(try await fixture.repository.load().configuration == DockConfiguration(preferences: DockPreferences(slotWidth: 30)))
     }
 
     @Test("손상된 설정은 v1 백업에서 복구하면서 현재 형식으로 저장한다")
@@ -205,7 +318,7 @@ struct ConfigurationRepositoryTests {
         try legacy.write(to: fixture.primary)
         try future.write(to: fixture.backup)
         let result = try await fixture.repository.load()
-        #expect(result.configuration == DockConfiguration())
+        #expect(result.configuration == DockConfiguration(preferences: DockPreferences(slotWidth: 30)))
         await #expect(throws: ConfigurationRepositoryError.futureSchema(3)) {
             try await fixture.repository.save(result.configuration, revision: 1)
         }

@@ -9,6 +9,24 @@ import Testing
 struct WorkspaceCatalogReconcilerTests {
     private let now = Date(timeIntervalSince1970: 100_000)
 
+    @Test("삭제한 실행 앱은 반복 관찰·종료·재실행 이후에도 목록에 다시 추가되지 않는다")
+    func removedRunningApplicationStaysRemoved() {
+        let removed = app("removed", path: "/Applications/Removed.app")
+        let other = app("other", path: "/Applications/Other.app")
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [removed, other]))
+        catalog.remove(removed.id)
+        for observed in [[snapshot(removed), snapshot(other)], [], [snapshot(removed, pid: 20)]] {
+            WorkspaceCatalogReconciler.reconcile(
+                catalog: &catalog, snapshots: observed, ownProcessIdentifier: 999, now: now,
+                resolve: { $0.path == removed.bundlePath ? removed : other }, refresh: { $0 }
+            )
+            #expect(catalog.orderedApps.map(\.id) == [other.id])
+        }
+        let restored = catalog.upsertRestoring(removed)
+        #expect(restored == removed.id)
+        #expect(catalog.orderedApps.map(\.id) == [other.id, removed.id])
+    }
+
     @Test("동일 경로가 다른 앱으로 대체되면 새 설치만 실행 중·현재 앱으로 연결한다")
     func processProjectionDistinguishesReplacementAtSamePath() {
         let old = app("old", path: "/Applications/Shared.app")

@@ -8,6 +8,112 @@ private func entry(_ id: String, pinned: Bool = false, seen: Date = Date(timeInt
 
 @Suite("도크 순서와 사용자 정책")
 struct DockCatalogTests {
+    @Test("삭제한 앱은 목록에서 사라지고 반복 관찰과 이력 정리로 복원되지 않는다")
+    func removalSuppressesRediscoveryAndSurvivesPruning() {
+        let before = entry("before", pinned: true)
+        let removed = entry("removed", pinned: true)
+        let after = entry("after", pinned: true)
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [before, removed, after]))
+        catalog.remove(removed.id)
+        #expect(catalog.configuration.apps == [before, after])
+        #expect(catalog.configuration.order == [before.id, after.id])
+        #expect(catalog.configuration.removedApps == [removed])
+        var observed = removed
+        observed.id = AppID(rawValue: "new-observation-id")
+        for _ in 0..<3 { catalog.upsert(observed) }
+        catalog.pruneHistory(runningIDs: [], now: Date.distantFuture, maximumEntries: 0)
+        #expect(catalog.orderedApps == [before, after])
+        #expect(catalog.isRemoved(observed))
+        #expect(catalog.configuration.removedApps == [removed])
+    }
+
+    @Test("명시적 재추가는 삭제 기록의 ID를 재사용해 끝에 복원하고 이후 중복을 만들지 않는다")
+    func explicitAdditionRestoresPersistentIdentity() throws {
+        let removed = entry("removed", pinned: true)
+        let other = entry("other", pinned: true)
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [removed, other]))
+        catalog.remove(removed.id)
+        var added = removed
+        added.id = AppID(rawValue: "resolver-id")
+        let restoration = catalog.upsertRestoring(added)
+        let restoredID = try #require(restoration)
+        #expect(restoredID == removed.id)
+        #expect(catalog.configuration.removedApps.isEmpty)
+        #expect(catalog.configuration.order == [other.id, removed.id])
+        let repeatedRestoration = catalog.upsertRestoring(added)
+        #expect(repeatedRestoration == restoredID)
+        #expect(catalog.orderedApps.count == 2)
+        #expect(catalog.configuration.order == [other.id, removed.id])
+    }
+
+    @Test("삭제된 앱의 이동 경로도 억제하되 별도 설치와 교체된 앱은 허용한다")
+    func removalTracksMovedInstallationWithoutBlockingOtherApps() {
+        var original = entry("removed")
+        original.bundleIdentifier = "test.editor"
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [original]))
+        catalog.remove(original.id)
+        var moved = original
+        moved.bundlePath = "/Applications/Moved.app"
+        moved.bookmarkData = Data([7, 8])
+        catalog.refreshRemovedApp(moved)
+        var observed = moved
+        observed.id = AppID(rawValue: "observed")
+        catalog.upsert(observed)
+        #expect(catalog.orderedApps.isEmpty)
+        #expect(catalog.configuration.removedApps.first?.bookmarkData == moved.bookmarkData)
+        var secondInstallation = original
+        secondInstallation.id = AppID(rawValue: "separate-installation")
+        catalog.upsert(secondInstallation)
+        var replacement = observed
+        replacement.id = AppID(rawValue: "replacement")
+        replacement.bundleIdentifier = "test.other-app"
+        catalog.upsert(replacement)
+        #expect(catalog.orderedApps.map(\.id) == [secondInstallation.id, replacement.id])
+    }
+
+    @Test("내부 중복 정리는 삭제 기록을 만들지 않고 제외는 목록에 남는다")
+    func duplicateCleanupAndExclusionDoNotSuppressInstallation() {
+        let retained = entry("retained", pinned: true)
+        var duplicate = retained
+        duplicate.id = AppID(rawValue: "duplicate")
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [retained, duplicate]))
+        catalog.remove(duplicate.id, suppressRediscovery: false)
+        #expect(catalog.configuration.removedApps.isEmpty)
+        catalog.exclude(retained.id, true)
+        #expect(catalog.orderedApps.map(\.id) == [retained.id])
+        #expect(catalog.visibleItems(runningIDs: [retained.id]).isEmpty)
+        #expect(!catalog.isRemoved(retained))
+        catalog.exclude(retained.id, false)
+        #expect(catalog.visibleItems(runningIDs: []).map(\.id) == [retained.id])
+    }
+
+    @Test("알려진 Dock 경로는 표기 중복을 없애고 현재 목록으로 교체한다")
+    func knownDockPathsAreReplacedRatherThanAccumulated() {
+        var catalog = DockCatalog()
+        catalog.updateKnownSystemDockPaths(["/Applications/A.app", "/Applications/Unused/../A.app", "/Applications/B.app"])
+        #expect(catalog.configuration.knownSystemDockPaths == ["/Applications/A.app", "/Applications/B.app"])
+        catalog.updateKnownSystemDockPaths(["/Applications/B.app"])
+        #expect(catalog.configuration.knownSystemDockPaths == ["/Applications/B.app"])
+    }
+
+    @Test("삭제 기록과 살아 있는 중복이 함께 저장돼도 삭제가 우선하며 다른 순서를 유지한다")
+    func normalizationHonorsRemovalOverStaleLiveEntries() {
+        let removed = entry("removed")
+        let first = entry("first", pinned: true)
+        let last = entry("last", pinned: true)
+        var observed = removed
+        observed.id = AppID(rawValue: "observed-id")
+        let normalized = DockConfiguration(
+            apps: [first, removed, observed, last],
+            order: [last.id, observed.id, removed.id, first.id],
+            removedApps: [removed, removed]
+        ).normalized()
+        #expect(normalized.apps == [first, last])
+        #expect(normalized.order == [last.id, first.id])
+        #expect(normalized.removedApps == [removed])
+        #expect(normalized.normalized() == normalized)
+    }
+
     @Test("실행·종료·메타데이터 갱신 뒤에도 사용자가 정한 상대 순서를 유지한다")
     func lifecyclePreservesOrder() {
         let apps = [entry("a", pinned: true), entry("b"), entry("c", pinned: true)]
@@ -124,19 +230,24 @@ struct DockCatalogTests {
     func preferencesAreBounded() {
         let normalized = DockPreferences(iconSize: .infinity, slotWidth: -.infinity, maxVisibleApps: -200).normalized()
         #expect(normalized.iconSize == 24)
-        #expect(normalized.slotWidth == 30)
+        #expect(normalized.slotWidth == 24)
         #expect(normalized.maxVisibleApps == 1)
-        #expect(DockPreferences(iconSize: -10, slotWidth: 100, maxVisibleApps: 200).normalized() == DockPreferences(iconSize: 16, slotWidth: 60, maxVisibleApps: 20))
-        #expect(DockPreferences(iconSize: 100, slotWidth: -10).normalized() == DockPreferences(iconSize: 32, slotWidth: 22))
+        #expect(DockPreferences(iconSize: -10, slotWidth: 100, maxVisibleApps: 200).normalized() == DockPreferences(iconSize: 16, slotWidth: 44, maxVisibleApps: 20))
+        #expect(DockPreferences(iconSize: 100, slotWidth: -10).normalized() == DockPreferences(iconSize: 32, slotWidth: 32))
         #expect(DockPreferences(iconSize: .nan, slotWidth: .nan).normalized() == DockPreferences())
     }
 
-    @Test("아이콘 크기와 슬롯 폭은 독립 설정으로 보존한다")
-    func iconAndSlotDimensionsAreIndependent() throws {
-        let preferences = DockPreferences(iconSize: 30, slotWidth: 24)
+    @Test("추가 여백 0을 허용하면서 아이콘보다 작은 영역만 넓힌다")
+    func iconAndSlotDimensionsPreserveRequiredSpace() throws {
+        let preferences = DockPreferences(iconSize: 30, slotWidth: 40)
         #expect(preferences.normalized() == preferences)
+        let fitted = DockPreferences(iconSize: 32, slotWidth: 30).normalized()
+        #expect(fitted == DockPreferences(iconSize: 32, slotWidth: 32))
+        #expect(fitted.normalized() == fitted)
+        #expect(DockPreferences(iconSize: 16, slotWidth: 16).normalized() == DockPreferences(iconSize: 16, slotWidth: 16))
+        #expect(DockPreferences(iconSize: 16, slotWidth: 60).normalized() == DockPreferences(iconSize: 16, slotWidth: 44))
         let encoded = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(DockPreferences.self, from: encoded) == preferences)
-        #expect(try JSONDecoder().decode(DockPreferences.self, from: Data("{}".utf8)) == DockPreferences(iconSize: 24, slotWidth: 30))
+        #expect(try JSONDecoder().decode(DockPreferences.self, from: Data("{}".utf8)) == DockPreferences(iconSize: 24, slotWidth: 24))
     }
 }

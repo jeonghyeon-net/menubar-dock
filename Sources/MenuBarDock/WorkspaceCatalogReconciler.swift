@@ -115,7 +115,7 @@ struct WorkspaceCatalogReconciler {
             catalog.pin(retained.id, pinned)
             // pin(true)는 제외를 해제하므로 명시적 제외 정책은 병합의 마지막에 복원한다.
             catalog.exclude(retained.id, excluded)
-            catalog.remove(app.id)
+            catalog.remove(app.id, suppressRediscovery: false)
             retained.isPinned = pinned
             retained.isExcluded = excluded
             retainedByInstallation[identity] = retained

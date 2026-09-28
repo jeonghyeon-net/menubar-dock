@@ -4,6 +4,34 @@ import Testing
 
 @MainActor
 struct ApplicationResolverTests {
+    @Test("시스템 Finder의 FNDR 번들도 정상 앱으로 읽고 bookmark를 만든다")
+    func resolvesSystemFinder() throws {
+        let url = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
+        let bundle = try #require(Bundle(url: url))
+        #expect(bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String == "FNDR")
+        let entry = try ApplicationResolver().resolve(url: url)
+        #expect(entry.bundleIdentifier == "com.apple.finder")
+        #expect(entry.bundlePath == canonicalApplicationURL(url).path)
+        #expect(entry.bookmarkData?.isEmpty == false)
+        #expect(ApplicationResolver().refresh(entry)?.id == entry.id)
+    }
+
+    @Test("다른 경로의 FNDR과 일반 비앱 번들은 허용하지 않는다", arguments: [
+        ("FNDR", "tests.menubardock.fixture"),
+        ("FNDR", "com.apple.finder"),
+        ("BNDL", "tests.menubardock.fixture"),
+    ])
+    func rejectsOtherNonApplicationPackageTypes(_ values: (String, String)) throws {
+        let fixture = try PlatformFixture(identifier: values.1)
+        let plist = fixture.applicationURL.appendingPathComponent("Contents/Info.plist")
+        var info = try #require(PropertyListSerialization.propertyList(from: Data(contentsOf: plist), format: nil) as? [String: String])
+        info["CFBundlePackageType"] = values.0
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: plist)
+        #expect(throws: ApplicationResolutionError.invalidApplication) {
+            try ApplicationResolver().resolve(url: fixture.applicationURL)
+        }
+    }
+
     @Test("앱 이름과 실행 위치를 확인하고 복원 가능한 bookmark를 만든다")
     func resolvesApplication() throws {
         let fixture = try PlatformFixture()

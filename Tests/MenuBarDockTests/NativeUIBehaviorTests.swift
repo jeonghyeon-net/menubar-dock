@@ -72,15 +72,11 @@ struct NativeUIBehaviorTests {
         #expect(anchors.last === first)
         let menu = try #require(menus.last)
         #expect(menu.item(at: 0)?.title == "설정…")
-        #expect(menu.item(at: 1)?.title == "크기 및 간격…")
+        #expect(menu.item(withTitle: "크기 및 간격…") == nil)
         let settings = try #require(menu.item(at: 0))
         let settingsAction = try #require(settings.action)
         #expect(NSApp.sendAction(settingsAction, to: settings.target, from: settings))
         #expect(fixture.actions.contains { if case .settings = $0 { true } else { false } })
-        let appearance = try #require(menu.item(at: 1))
-        let appearanceAction = try #require(appearance.action)
-        #expect(NSApp.sendAction(appearanceAction, to: appearance.target, from: appearance))
-        #expect(fixture.actions.contains { if case .appearanceSettings = $0 { true } else { false } })
 
         event = try makeMouseRelease(.leftMouseUp, flags: .control, button: second)
         try dispatchControlAction(second)
@@ -100,7 +96,7 @@ struct NativeUIBehaviorTests {
         #expect(items.allSatisfy { $0.menu == nil })
     }
 
-    @Test func iconsFitTheSlotAndReactToButtonHeightChanges() throws {
+    @Test func iconSizeGrowsTheNativeButtonAndReservesEnoughWidth() throws {
         let fixture = UIInputFixture()
         fixture.model.preferences.iconSize = 32
         fixture.model.preferences.slotWidth = 22
@@ -111,19 +107,55 @@ struct NativeUIBehaviorTests {
             return item
         })
         defer { controller.tearDown(); fixture.close() }
-        let button = try #require(items.first?.button)
-        let image = try #require(button.image)
-        #expect(image.size.width <= 18)
-        #expect(image.size.height <= button.bounds.height - 4)
+        let item = try #require(items.first)
+        let button = try #require(item.button)
+        #expect(button.image?.size == NSSize(width: 32, height: 32))
+        #expect(item.length == 32)
+        #expect(button.bounds.height >= 32)
         #expect(button.imageScaling == .scaleProportionallyDown)
-        button.setFrameSize(NSSize(width: 22, height: 18))
+        #expect(button.bounds.width == 32)
+        let imageRect = try #require(button.cell?.imageRect(forBounds: button.bounds))
+        #expect(imageRect.width == 32)
+        #expect(imageRect.height == 32)
+        #expect(button.bounds.contains(imageRect))
+        fixture.model.preferences.iconSize = 16
         controller.update()
-        #expect(button.image?.size == NSSize(width: 14, height: 14))
-        // NSStatusBarButton은 image 할당 후 시스템 높이로 돌아갈 수 있으므로 최종 경계를 확인한다.
-        controller.update()
-        let resizedImage = try #require(button.image)
-        #expect(resizedImage.size.width <= min(button.bounds.width, fixture.model.preferences.slotWidth) - 4)
-        #expect(resizedImage.size.height <= button.bounds.height - 4)
+        #expect(button.image?.size == NSSize(width: 16, height: 16))
+        #expect(item.length == 22)
+        #expect(item.button === button)
+    }
+
+    @Test func requestedIconSizesRenderDistinctPixelAreas() throws {
+        let fixture = UIInputFixture()
+        let model = DockPresentationModel(imageForApp: { _ in
+            NSWorkspace.shared.icon(forFile: "/System/Library/CoreServices/Finder.app")
+        }, perform: { _ in })
+        model.items = [DockItem(app: fixture.entries[0], isRunning: false)]
+        model.preferences.slotWidth = 40
+        var item: NSStatusItem?
+        let controller = StatusItemController(model: model, makeStatusItem: { length in
+            let created = NSStatusBar.system.statusItem(withLength: length)
+            item = created
+            return created
+        })
+        defer { controller.tearDown(); fixture.close() }
+        let button = try #require(item?.button)
+        var pixelAreas: [Int] = []
+        for size in [16.0, 20.0, 24.0, 28.0, 32.0] {
+            model.preferences.iconSize = size
+            controller.update()
+            #expect(button.image?.size == NSSize(width: size, height: size))
+            let bitmap = try #require(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+            button.cacheDisplay(in: button.bounds, to: bitmap)
+            var visiblePixels = 0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide where (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5 {
+                    visiblePixels += 1
+                }
+            }
+            pixelAreas.append(visiblePixels)
+        }
+        #expect(zip(pixelAreas, pixelAreas.dropFirst()).allSatisfy { pair in pair.0 < pair.1 })
     }
 
     @Test func hiddenAppsDoNotLeaveBlankOrManagementStatusItems() {
@@ -279,8 +311,6 @@ struct NativeUIBehaviorTests {
         defer { settings.close() }
         settings.show()
         let content = try #require(settings.window?.contentView)
-        let tabs = try #require(descendants(of: content).compactMap { $0 as? NSTabView }.first)
-        tabs.selectTabViewItem(at: 2)
         content.layoutSubtreeIfNeeded()
         let recorder = try #require(descendants(of: content).compactMap { $0 as? NSButton }.first {
             $0.accessibilityLabel() == "다음 앱 단축키 변경"
@@ -300,8 +330,6 @@ struct NativeUIBehaviorTests {
         defer { settings.close() }
         settings.show()
         let content = try #require(settings.window?.contentView)
-        let tabs = try #require(descendants(of: content).compactMap { $0 as? NSTabView }.first)
-        tabs.selectTabViewItem(at: 2)
         content.layoutSubtreeIfNeeded()
         let recorder = try #require(descendants(of: content).compactMap { $0 as? NSButton }.first {
             $0.accessibilityLabel() == "다음 앱 단축키 변경"

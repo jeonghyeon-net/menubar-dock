@@ -88,10 +88,12 @@ final class StatusItemController: NSObject {
     func update() {
         guard !isTornDown else { return }
         let preferences = model.preferences
+        let iconSize = CGFloat(preferences.iconSize)
+        let slotWidth = max(CGFloat(preferences.slotWidth), iconSize)
         let visible = Array(model.items.prefix(preferences.maxVisibleApps))
-        resizeSlots(to: visible.count)
-        for slot in slots where slot.item.length != CGFloat(preferences.slotWidth) {
-            slot.item.length = CGFloat(preferences.slotWidth)
+        resizeSlots(to: visible.count, width: slotWidth)
+        for slot in slots where slot.item.length != slotWidth {
+            slot.item.length = slotWidth
         }
         let ordered = orderedSlots()
         let sizes = ordered.map { $0.item.button?.bounds.size ?? .zero }
@@ -103,10 +105,7 @@ final class StatusItemController: NSObject {
         for (slot, entry) in zip(ordered, visible) {
             slot.appID = entry.id
             guard let button = slot.item.button else { continue }
-            let height = button.bounds.height > 0 ? button.bounds.height : NSStatusBar.system.thickness
-            let width = button.bounds.width > 0 ? min(button.bounds.width, CGFloat(preferences.slotWidth)) : CGFloat(preferences.slotWidth)
-            // 노치 유무와 설정값에 관계없이 실제 버튼의 사방에 최소 2pt 여백을 남긴다.
-            let iconSize = max(1, min(CGFloat(preferences.iconSize), height - 4, width - 4))
+            // 표준 버튼은 이미지 크기에 맞춰 높이를 정한다. 이전 높이로 제한하면 큰 값으로 변경할 수 없다.
             let image = model.imageForApp(entry.app).copy() as? NSImage
             image?.size = NSSize(width: iconSize, height: iconSize)
             button.image = image
@@ -116,7 +115,7 @@ final class StatusItemController: NSObject {
         }
     }
 
-    private func resizeSlots(to count: Int) {
+    private func resizeSlots(to count: Int, width: CGFloat) {
         if count < slots.count {
             for slot in slots.filter({ $0.number >= count }) {
                 removeStatusItem(slot.item)
@@ -126,7 +125,7 @@ final class StatusItemController: NSObject {
         guard count > slots.count else { return }
         // 새 상태 항목은 왼쪽에 추가된다. 최초 생성 때 0번 슬롯이 왼쪽이 되도록 역순 생성한다.
         for number in (slots.count..<count).reversed() {
-            let item = makeStatusItem(CGFloat(model.preferences.slotWidth))
+            let item = makeStatusItem(width)
             item.autosaveName = "MenuBarDock.AppSlot.\(number)"
             item.behavior = []
             item.menu = nil
@@ -175,7 +174,6 @@ final class StatusItemController: NSObject {
         let menu = NSMenu()
         menu.autoenablesItems = false
         append("설정…", action: .settings, to: menu, key: ",")
-        append("크기 및 간격…", action: .appearanceSettings, to: menu)
         if let app = model.items.first(where: { $0.id == id })?.app {
             menu.addItem(.separator())
             let pin = append("고정", action: .pin(id, !app.isPinned), to: menu, enabled: !model.isReadOnly)
