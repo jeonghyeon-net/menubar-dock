@@ -1,6 +1,6 @@
 # Menu Bar Dock
 
-macOS Dock에 고정한 앱과 실행 중인 앱을 메뉴 막대에서 바로 여세요.
+Dock은 숨기고, 앱은 메뉴 막대에서 여세요.
 
 <p align="center">
   <img src="docs/assets/menu-bar-hero.png" width="605" alt="실제 macOS 메뉴 막대에 나란히 놓인 시스템 설정, ChatGPT, Safari, Slack, Notion, Visual Studio Code, Finder 아이콘">
@@ -9,6 +9,16 @@ macOS Dock에 고정한 앱과 실행 중인 앱을 메뉴 막대에서 바로 �
 각 앱 아이콘을 클릭하면 바로 실행하거나 전환합니다. 앱 순서·크기·간격을 조절하고, 메뉴 막대에 다 들어가지 않는 앱은 `Option+Tab`으로 선택할 수 있습니다.
 
 [시작하기](#시작하기) · [사용 안내](docs/user-guide.md) · [개발과 기여](CONTRIBUTING.md) · [아키텍처](docs/architecture.md) · [배포](docs/releasing.md)
+
+## 만든 이유
+
+가뜩이나 작은 맥북 화면에서 Dock이 차지하는 공간이 아까워 만들었습니다. 앱 실행과 전환을 이미 있는 메뉴 막대로 옮기면 화면 아래쪽을 작업 공간으로 쓸 수 있습니다. macOS의 Dock 자동 숨김과 함께 사용하세요.
+
+<p align="center">
+  <img src="docs/assets/touch-bar-reference.jpeg" width="500" alt="MacBook Pro에서 Windows 작업 표시줄을 화면 하단과 Touch Bar에 표시한 참고 사례">
+</p>
+
+참고 이미지: Windows 작업 표시줄을 Touch Bar에 표시한 실험. [Jablíčkář.cz 기사](https://jablickar.cz/ko/touch-bar-na-windows/)에 실린 사진입니다.
 
 ## 시작하기
 

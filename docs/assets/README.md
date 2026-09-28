@@ -7,5 +7,6 @@
 - `menu-bar.png`: 입력 검증 도구가 실제 시스템 버튼을 개별 렌더해 나란히 배치한 참고 이미지. 데스크톱 메뉴 막대 전체 캡처와 구별한다.
 - `appearance.png`: 1.0.2의 표시 설정 기록.
 - `inactive-display-reference.png`: 비활성 디스플레이 문제를 기록한 사용자 참고 이미지.
+- `touch-bar-reference.jpeg`: 사용자가 지정한 [Jablíčkář.cz 기사](https://jablickar.cz/ko/touch-bar-na-windows/)의 대표 사진. Windows 작업 표시줄을 Touch Bar에 표시한 참고 사례이며 Menu Bar Dock의 제품 화면은 아니다. [원본 JPEG](https://jablickar.cz/wp-content/uploads/2019/08/Windows-Touch-Bar-1.jpeg)를 2026-09-28에 내려받았고, 1000×750px 원본을 편집 없이 보관한다. 이 외부 사진은 프로젝트의 MIT 라이선스 적용 대상에서 제외하며 권리는 원저작자에게 있다.
 
 실제 앱 캡처에는 아이콘이나 동작을 합성하지 않는다. 대표 화면은 메뉴 막대를 우선하고, 설정·키보드 선택 패널은 해당 기능 설명에 배치한다.
