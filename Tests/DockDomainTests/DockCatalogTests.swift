@@ -8,6 +8,116 @@ private func entry(_ id: String, pinned: Bool = false, seen: Date = Date(timeInt
 
 @Suite("도크 순서와 사용자 정책")
 struct DockCatalogTests {
+    @Test("저장 목록에는 항상 표시 앱만 남고 미등록 실행 앱은 앞에 한 번씩 표시한다")
+    func savedProjectionSeparatesTemporaryAppsAndHonorsLegacyExclusions() {
+        let first = entry("first", pinned: true)
+        let temporary = entry("temporary")
+        var hidden = entry("hidden", pinned: true)
+        hidden.isExcluded = true
+        let second = entry("second", pinned: true)
+        let anotherTemporary = entry("another-temporary")
+        let stopped = entry("stopped")
+        let removed = entry("removed", pinned: true)
+        let apps = [first, temporary, hidden, second, anotherTemporary, stopped, removed]
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: apps))
+        catalog.remove(removed.id)
+        let originalOrder = catalog.configuration.order
+        let runningIDs: Set<AppID> = [first.id, temporary.id, hidden.id, anotherTemporary.id, removed.id]
+        #expect(catalog.savedApps == [first, second])
+        let visible = catalog.visibleItems(runningIDs: runningIDs)
+        #expect(visible.map(\.id) == [temporary.id, anotherTemporary.id, first.id, second.id])
+        #expect(visible.map(\.isRunning) == [true, true, true, false])
+        #expect(Set(visible.map(\.id)).count == visible.count)
+        #expect(catalog.visibleItems(runningIDs: []).map(\.id) == [first.id, second.id])
+        #expect(catalog.configuration.order == originalOrder)
+        catalog.updatePreferences(DockPreferences(showsRunningApps: false))
+        #expect(catalog.visibleItems(runningIDs: runningIDs).map(\.id) == [first.id, second.id])
+    }
+
+    @Test("새 저장과 숨김 앱 재등록은 저장 목록 끝에 추가하고 반복 저장은 순서를 유지한다")
+    func savingAppendsNewEntriesButPreservesAlreadySavedOrder() {
+        let first = entry("first", pinned: true)
+        let temporary = entry("temporary")
+        var hidden = entry("hidden", pinned: true)
+        hidden.isExcluded = true
+        let last = entry("last", pinned: true)
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [first, temporary, hidden, last]))
+        catalog.save(temporary.id)
+        #expect(catalog.savedApps.map(\.id) == [first.id, last.id, temporary.id])
+        #expect(catalog.configuration.order == [first.id, hidden.id, last.id, temporary.id])
+        catalog.save(hidden.id)
+        #expect(catalog.savedApps.map(\.id) == [first.id, last.id, temporary.id, hidden.id])
+        #expect(catalog.savedApps.allSatisfy { $0.isPinned && !$0.isExcluded })
+        let saved = catalog.configuration
+        catalog.save(first.id)
+        catalog.save(temporary.id)
+        catalog.save(AppID(rawValue: "unknown"))
+        #expect(catalog.configuration == saved)
+        catalog.pin(last.id, false)
+        catalog.save(last.id)
+        #expect(catalog.savedApps.map(\.id) == [first.id, temporary.id, hidden.id, last.id])
+    }
+
+    @Test("삭제된 앱은 저장 명령만으로 복원되지 않고 명시적 재추가 후 기존 ID로 끝에 등록된다")
+    func removedAppRequiresExplicitRestorationBeforeSaving() throws {
+        let removed = entry("removed", pinned: true)
+        let retained = entry("retained", pinned: true)
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [removed, retained]))
+        catalog.remove(removed.id)
+        catalog.save(removed.id)
+        catalog.upsert(removed)
+        #expect(catalog.savedApps == [retained])
+        var added = removed
+        added.id = AppID(rawValue: "resolved-again")
+        added.isPinned = false
+        let restoredID = catalog.upsertRestoring(added)
+        let id = try #require(restoredID)
+        catalog.save(id)
+        #expect(id == removed.id)
+        #expect(catalog.savedApps.map(\.id) == [retained.id, removed.id])
+        #expect(catalog.configuration.removedApps.isEmpty)
+    }
+
+    @Test("저장 앱 다중 드래그는 임시·숨김 항목의 원래 위치를 보존한다")
+    func movingSavedSubsetKeepsNonSavedSlotsIntact() {
+        var hidden = entry("hidden", pinned: true)
+        hidden.isExcluded = true
+        let apps = [entry("temporary"), entry("a", pinned: true), hidden, entry("b", pinned: true),
+                    entry("stopped"), entry("c", pinned: true), entry("d", pinned: true)]
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: apps))
+        catalog.moveSaved(fromOffsets: IndexSet([0, 2]), toOffset: 4)
+        #expect(catalog.savedApps.map(\.name) == ["b", "d", "a", "c"])
+        #expect(catalog.orderedApps.map(\.name) == ["temporary", "b", "hidden", "d", "stopped", "a", "c"])
+        #expect(catalog.configuration.apps == apps)
+        catalog.moveSaved(fromOffsets: IndexSet([2, 3]), toOffset: 0)
+        #expect(catalog.savedApps.map(\.name) == ["a", "c", "b", "d"])
+        #expect(catalog.orderedApps.map(\.name) == ["temporary", "a", "hidden", "c", "stopped", "b", "d"])
+        let valid = catalog.configuration
+        catalog.moveSaved(fromOffsets: [], toOffset: 0)
+        catalog.moveSaved(fromOffsets: IndexSet([0, 4]), toOffset: 0)
+        catalog.moveSaved(fromOffsets: IndexSet(integer: 0), toOffset: -1)
+        catalog.moveSaved(fromOffsets: IndexSet(integer: 0), toOffset: 5)
+        #expect(catalog.configuration == valid)
+    }
+
+    @Test("저장 목록의 모든 단일 이동은 항목과 나머지 상대 순서를 보존한다")
+    func everySavedMovePreservesPermutationAndNonSavedPositions() {
+        let apps = (0..<8).map { entry(String($0), pinned: $0.isMultiple(of: 2)) }
+        let saved = apps.filter(\.isPinned)
+        for source in saved.indices {
+            for destination in 0...saved.count {
+                var catalog = DockCatalog(configuration: DockConfiguration(apps: apps))
+                catalog.moveSaved(fromOffsets: IndexSet(integer: source), toOffset: destination)
+                #expect(Set(catalog.configuration.order) == Set(apps.map(\.id)))
+                #expect(catalog.configuration.order.count == apps.count)
+                #expect(catalog.savedApps.filter { $0.id != saved[source].id }.map(\.id) == saved.filter { $0.id != saved[source].id }.map(\.id))
+                for index in apps.indices where !apps[index].isPinned {
+                    #expect(catalog.configuration.order[index] == apps[index].id)
+                }
+            }
+        }
+    }
+
     @Test("삭제한 앱은 목록에서 사라지고 반복 관찰과 이력 정리로 복원되지 않는다")
     func removalSuppressesRediscoveryAndSurvivesPruning() {
         let before = entry("before", pinned: true)
@@ -123,9 +233,11 @@ struct DockCatalogTests {
             catalog.upsert(app)
             #expect(catalog.configuration.order == expectedOrder)
         }
-        #expect(catalog.visibleItems(runningIDs: Set(apps.map(\.id))).map(\.id) == expectedOrder)
+        let visibleOrder = [apps[1].id, apps[2].id, apps[0].id]
+        #expect(catalog.visibleItems(runningIDs: Set(apps.map(\.id))).map(\.id) == visibleOrder)
         #expect(catalog.visibleItems(runningIDs: []).map(\.id) == [apps[2].id, apps[0].id])
-        #expect(catalog.visibleItems(runningIDs: [apps[1].id]).map(\.id) == expectedOrder)
+        #expect(catalog.visibleItems(runningIDs: [apps[1].id]).map(\.id) == visibleOrder)
+        #expect(catalog.configuration.order == expectedOrder)
     }
 
     @Test("손상된 순서에서는 중복과 사라진 참조만 제거한다")

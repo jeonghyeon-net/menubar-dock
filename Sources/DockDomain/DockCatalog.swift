@@ -13,6 +13,11 @@ public struct DockCatalog: Sendable {
         return configuration.order.compactMap { entries[$0] }
     }
 
+    /// 설정에서 관리할 항상 표시 앱만 저장 순서대로 반환한다.
+    public var savedApps: [AppEntry] {
+        orderedApps.filter { $0.isPinned && !$0.isExcluded }
+    }
+
     public mutating func upsert(_ app: AppEntry) {
         guard !app.id.rawValue.isEmpty, !isRemoved(app) else { return }
         if let index = configuration.apps.firstIndex(where: { $0.id == app.id }) {
@@ -74,6 +79,17 @@ public struct DockCatalog: Sendable {
         if isPinned { configuration.apps[index].isExcluded = false }
     }
 
+    /// 새 등록은 저장 목록 끝에 추가하고 이미 등록된 앱의 순서는 바꾸지 않는다.
+    public mutating func save(_ id: AppID) {
+        guard let index = configuration.apps.firstIndex(where: { $0.id == id }) else { return }
+        let wasSaved = configuration.apps[index].isPinned && !configuration.apps[index].isExcluded
+        configuration.apps[index].isPinned = true
+        configuration.apps[index].isExcluded = false
+        guard !wasSaved else { return }
+        configuration.order.removeAll { $0 == id }
+        configuration.order.append(id)
+    }
+
     public mutating func exclude(_ id: AppID, _ isExcluded: Bool) {
         guard let index = configuration.apps.firstIndex(where: { $0.id == id }) else { return }
         configuration.apps[index].isExcluded = isExcluded
@@ -104,6 +120,20 @@ public struct DockCatalog: Sendable {
         configuration.order = remaining
     }
 
+    /// 저장 목록의 인덱스만 재배치해 임시·숨김 항목의 위치와 상대 순서를 유지한다.
+    public mutating func moveSaved(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        let savedOrder = savedApps.map(\.id)
+        guard (0...savedOrder.count).contains(destination), !offsets.isEmpty,
+              offsets.allSatisfy({ savedOrder.indices.contains($0) }) else { return }
+        let moving = offsets.map { savedOrder[$0] }
+        var remaining = savedOrder.enumerated().filter { !offsets.contains($0.offset) }.map(\.element)
+        let insertion = destination - offsets.filter { $0 < destination }.count
+        remaining.insert(contentsOf: moving, at: insertion)
+        let savedIDs = Set(savedOrder)
+        let positions = configuration.order.indices.filter { savedIDs.contains(configuration.order[$0]) }
+        for (position, id) in zip(positions, remaining) { configuration.order[position] = id }
+    }
+
     public mutating func updatePreferences(_ preferences: DockPreferences) {
         configuration.preferences = preferences.normalized()
     }
@@ -116,12 +146,11 @@ public struct DockCatalog: Sendable {
 
     /// 메뉴 막대의 폭 제한 전 후보다. 숨겨진 초과 항목도 선택 패널에서는 접근할 수 있다.
     public func visibleItems(runningIDs: Set<AppID>) -> [DockItem] {
-        orderedApps.compactMap { app in
-            let isRunning = runningIDs.contains(app.id)
-            guard !app.isExcluded,
-                  app.isPinned || (configuration.preferences.showsRunningApps && isRunning) else { return nil }
-            return DockItem(app: app, isRunning: isRunning)
-        }
+        let temporary = configuration.preferences.showsRunningApps ? orderedApps.filter {
+            !$0.isPinned && !$0.isExcluded && runningIDs.contains($0.id)
+        } : []
+        // 실행 이벤트는 저장 순서를 변경하지 않는다. 임시 앱도 기존 관찰 순서만 사용한다.
+        return (temporary + savedApps).map { DockItem(app: $0, isRunning: runningIDs.contains($0.id)) }
     }
 
     /// 사용자가 고정·제외한 기록과 실행 중 앱을 보호하며 오래된 관찰 기록만 정리한다.
