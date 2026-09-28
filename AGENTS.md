@@ -1,7 +1,7 @@
 # 개발 규칙
 
 - `main` 하나에서 작업한다. PR과 추가 브랜치를 만들지 않는다.
-- 도메인 정책은 `DockDomain`, 저장은 `DockPersistence`, OS 연동은 `DockPlatform`, 화면과 조립은 `MenuBarDock`에 둔다.
+- 도메인 정책은 `DockDomain`, 저장은 `DockPersistence`, OS 연동은 `DockPlatform`, 전역 키는 `DockShortcuts`, 화면과 조립은 `MenuBarDock`에 둔다.
 - 주석과 프로젝트 문서는 한국어로 작성한다. 식별자는 일관된 영어로 작성한다.
 - 실행 중 표시 및 타 앱 창의 디스플레이 간 이동을 추가하지 않는다.
 - 앱 순서는 실행/활성화 이벤트로 바뀌면 안 된다. 메뉴 막대의 빈 슬롯을 예약하지 않는다.
