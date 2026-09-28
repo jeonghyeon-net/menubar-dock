@@ -16,7 +16,7 @@
 
 ## 자동 검증
 
-테스트는 도메인 15개, 저장소 13개, 플랫폼 17개, 단축키 15개, 앱 조립/업데이트/UI 19개로 구성한다. 앱 테스트에는 실제 AppKit control/responder를 사용하며 다른 사용자 앱을 실행하거나 종료하지 않는다.
+테스트는 도메인 15개, 저장소 13개, 플랫폼 17개, 단축키 15개, 앱 조립/업데이트/UI 22개로 구성하며, 총 82개가 로컬에서 모두 통과했다. 앱 테스트에는 실제 AppKit control/responder를 사용하며 다른 사용자 앱을 실행하거나 종료하지 않는다.
 
 | 검증 | 명령 / 확인 내용 |
 | --- | --- |
@@ -32,6 +32,8 @@
 Command Line Tools에 존재하지 않는 Developer 하위 framework 경로를 검색하는 linker warning이 있다. Swift 코드 경고나 누락된 런타임 의존성과 구별한다. 현재 번들 검증과 실제 실행은 통과했다.
 
 통합 실행에서 `.terminateLater`의 modal 실행 루프가 MainActor 저장 continuation을 막는 현상을 재현했다. 저장은 detached task에서 actor로 전달하고, 완료는 modal/common 실행 루프에 전달해 `reply(toApplicationShouldTerminate:)`를 호출한다. 종료 요청을 취소했다가 다시 종료하는 우회 없이 정상 종료·로그아웃 응답 계약을 유지한다. 실제 프로세스 검사로 회귀를 잡는다.
+
+CLI Swift Testing에서 NSButton.performClick의 중첩 루프가 테스트 프로세스를 조기 종료하는 현상도 재현했다. 테스트는 실제 target/action과 responder를 직접 사용하도록 고쳤고 모든 suite의 완료 요약까지 확인한다. GitHub의 기본 Bash 3에서 빈 배열+set -u가 실패하는 문제도 분기 실행으로 해결했다.
 
 ## 실제 UI 확인
 

@@ -9,6 +9,16 @@ final class StatusItemController: NSObject {
         let rect: NSRect
     }
 
+    private struct RenderState: Equatable {
+        let items: [DockItem]
+        let preferences: DockPreferences
+        let height: CGFloat
+        let scale: CGFloat
+        let appearance: String
+        let increasedContrast: Bool
+        let reducedTransparency: Bool
+    }
+
     private let model: DockPresentationModel
     private let statusItem: NSStatusItem
     private var subscriptions: Set<AnyCancellable> = []
@@ -20,6 +30,8 @@ final class StatusItemController: NSObject {
     private var menuActions: [UUID: () -> Void] = [:]
     private var appearanceObservation: NSKeyValueObservation?
     private var screenObservation: NSKeyValueObservation?
+    private var renderedState: RenderState?
+    private(set) var renderCount = 0
 
     init(model: DockPresentationModel) {
         self.model = model
@@ -79,6 +91,18 @@ final class StatusItemController: NSObject {
         guard let button = statusItem.button else { return }
         let preferences = model.preferences
         let height = button.bounds.height > 0 ? button.bounds.height : NSStatusBar.system.thickness
+        let state = RenderState(
+            items: model.items, preferences: preferences, height: height,
+            scale: button.window?.backingScaleFactor ?? 1,
+            appearance: button.effectiveAppearance.name.rawValue,
+            increasedContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast,
+            reducedTransparency: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        )
+        // AppKit은 이미지 합성 중에도 appearance KVO를 보낸다. 값이 같은 알림으로
+        // 이미지를 재생성하면 다음 draw가 다시 KVO를 보내 idle 렌더링 루프가 생긴다.
+        guard state != renderedState else { return }
+        renderedState = state
+        renderCount += 1
         let iconSize = min(CGFloat(preferences.iconSize), height - 4)
         let spacing = CGFloat(preferences.iconSpacing)
         let visible = preferences.isCompact ? [] : Array(model.items.prefix(preferences.maxVisibleApps))

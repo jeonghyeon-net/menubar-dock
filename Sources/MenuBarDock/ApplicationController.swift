@@ -90,13 +90,11 @@ final class ApplicationController {
     }
 
     private var runningIDs: Set<AppID> {
-        let paths = Set(snapshots.compactMap { $0.bundleURL }.map { canonicalPath($0.path) })
-        return Set(catalog.orderedApps.filter { paths.contains(canonicalPath($0.bundlePath)) }.map(\.id))
+        WorkspaceCatalogReconciler.runningIDs(catalog: catalog, snapshots: snapshots)
     }
 
     private var currentAppID: AppID? {
-        guard let path = snapshots.first(where: \.isActive)?.bundleURL?.path else { return nil }
-        return catalog.orderedApps.first { canonicalPath($0.bundlePath) == canonicalPath(path) }?.id
+        WorkspaceCatalogReconciler.currentAppID(catalog: catalog, snapshots: snapshots)
     }
 
     private func publish() {

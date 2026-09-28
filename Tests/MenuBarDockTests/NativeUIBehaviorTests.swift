@@ -7,6 +7,26 @@ import DockDomain
 @Suite(.serialized)
 @MainActor
 struct NativeUIBehaviorTests {
+    @Test func unchangedAppearanceNotificationsDoNotCauseAnIdleRenderLoop() async {
+        let fixture = UIInputFixture()
+        let status = StatusItemController(model: fixture.model)
+        defer { status.tearDown(); fixture.close() }
+        await Task.yield()
+        await Task.yield()
+        status.update()
+        let initial = status.renderCount
+        for _ in 0..<100 {
+            status.update()
+            NotificationCenter.default.post(name: NSWindow.didChangeBackingPropertiesNotification, object: nil)
+        }
+        await Task.yield()
+        await Task.yield()
+        #expect(status.renderCount == initial)
+        fixture.model.preferences.iconSpacing += 1
+        status.update()
+        #expect(status.renderCount == initial + 1)
+    }
+
     @Test func arrowsAndReturnOpenTheSelectedApp() throws {
         let fixture = UIInputFixture()
         defer { fixture.close() }
@@ -77,13 +97,14 @@ struct NativeUIBehaviorTests {
         #expect(table.numberOfRows == 3)
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         let down = try #require(descendants(of: content).compactMap { $0 as? NSButton }.first { $0.title == "↓ 아래로" })
-        down.performClick(nil)
+        try dispatchControlAction(down)
         #expect(fixture.actions.contains { action in
             if case let .move(source, target) = action { return source == IndexSet(integer: 0) && target == 2 }
             return false
         })
         let pin = try #require(table.view(atColumn: 1, row: 0, makeIfNecessary: true) as? NSButton)
-        pin.performClick(nil)
+        pin.setNextState()
+        try dispatchControlAction(pin)
         #expect(fixture.actions.contains { action in
             if case let .pin(id, value) = action { return id == fixture.entries[0].id && !value }
             return false
@@ -91,7 +112,6 @@ struct NativeUIBehaviorTests {
     }
 
     @Test func shortcutRecordingRestoresGlobalHandlingOnEscapeAndFocusLoss() throws {
-        Thread.sleep(forTimeInterval: 8)
         let fixture = UIInputFixture()
         defer { fixture.close() }
         let settings = SettingsWindowController(model: fixture.model)
@@ -104,10 +124,10 @@ struct NativeUIBehaviorTests {
         let recorder = try #require(descendants(of: content).compactMap { $0 as? NSButton }.first {
             $0.accessibilityLabel() == "다음 앱 단축키 변경"
         })
-        recorder.performClick(nil)
+        try dispatchControlAction(recorder)
         recorder.keyDown(with: try makeKey(53, window: settings.window))
         #expect(fixture.suspensions == [true, false])
-        recorder.performClick(nil)
+        try dispatchControlAction(recorder)
         settings.window?.makeFirstResponder(nil)
         #expect(fixture.suspensions == [true, false, true, false])
     }
@@ -125,7 +145,7 @@ struct NativeUIBehaviorTests {
         let recorder = try #require(descendants(of: content).compactMap { $0 as? NSButton }.first {
             $0.accessibilityLabel() == "다음 앱 단축키 변경"
         })
-        recorder.performClick(nil)
+        try dispatchControlAction(recorder)
         recorder.keyDown(with: try makeKey(48, flags: [.control, .option], window: settings.window))
         #expect(fixture.actions.contains { action in
             if case let .shortcut(direction, binding) = action {
@@ -197,4 +217,11 @@ private func makeKey(_ code: UInt16, flags: NSEvent.ModifierFlags = [], window: 
 @MainActor
 private func descendants(of view: NSView) -> [NSView] {
     [view] + view.subviews.flatMap { descendants(of: $0) }
+}
+
+/// CLI 테스트에는 AppKit 주 실행 루프가 없으므로 버튼 점멸용 중첩 루프 대신 실제 target/action을 전달한다.
+@MainActor
+private func dispatchControlAction(_ control: NSControl) throws {
+    let action = try #require(control.action)
+    #expect(control.sendAction(action, to: control.target))
 }

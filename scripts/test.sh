@@ -4,9 +4,10 @@ set -euo pipefail
 task_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$task_root"
 task_developer="$(xcode-select -p)"
-task_flags=()
 task_plugin="$task_developer/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib"
 if [ -f "$task_plugin" ]; then
-    task_flags=(-Xswiftc -load-plugin-library -Xswiftc "$task_plugin")
+    swift test -Xswiftc -load-plugin-library -Xswiftc "$task_plugin" "$@"
+else
+    # macOS 기본 Bash 3에서는 nounset 상태의 빈 배열 확장이 오류가 된다.
+    swift test "$@"
 fi
-swift test "${task_flags[@]}" "$@"

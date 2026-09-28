@@ -9,6 +9,36 @@ import Testing
 struct WorkspaceCatalogReconcilerTests {
     private let now = Date(timeIntervalSince1970: 100_000)
 
+    @Test("동일 경로가 다른 앱으로 대체되면 새 설치만 실행 중·현재 앱으로 연결한다")
+    func processProjectionDistinguishesReplacementAtSamePath() {
+        let old = app("old", path: "/Applications/Shared.app")
+        let replacement = app("replacement", path: old.bundlePath)
+        let catalog = DockCatalog(configuration: DockConfiguration(apps: [old, replacement]))
+        let snapshots = [snapshot(replacement, active: true)]
+        let running = WorkspaceCatalogReconciler.runningIDs(catalog: catalog, snapshots: snapshots)
+        #expect(running == [replacement.id])
+        #expect(catalog.visibleItems(runningIDs: running).map(\.id) == [replacement.id])
+        #expect(WorkspaceCatalogReconciler.currentAppID(catalog: catalog, snapshots: snapshots) == replacement.id)
+    }
+
+    @Test("프로세스 연결은 같은 bundle ID의 다른 설치를 구분하고 ID가 없으면 경로로 확인한다")
+    func processProjectionRespectsInstallationAndUnknownIdentifier() {
+        let stable = app("stable", path: "/Applications/Editor.app")
+        var preview = app("preview", path: "/Applications/Preview/Editor.app")
+        preview.bundleIdentifier = stable.bundleIdentifier
+        let catalog = DockCatalog(configuration: DockConfiguration(apps: [stable, preview]))
+        let previewSnapshots = [snapshot(preview, active: true)]
+        #expect(WorkspaceCatalogReconciler.runningIDs(catalog: catalog, snapshots: previewSnapshots) == [preview.id])
+        #expect(WorkspaceCatalogReconciler.currentAppID(catalog: catalog, snapshots: previewSnapshots) == preview.id)
+
+        var unknownIdentity = preview
+        unknownIdentity.bundleIdentifier = nil
+        let unknownSnapshots = [snapshot(unknownIdentity, active: true)]
+        #expect(WorkspaceCatalogReconciler.runningIDs(catalog: catalog, snapshots: unknownSnapshots) == [preview.id])
+        #expect(WorkspaceCatalogReconciler.currentAppID(catalog: catalog, snapshots: unknownSnapshots) == preview.id)
+        #expect(WorkspaceCatalogReconciler.currentAppID(catalog: catalog, snapshots: [snapshot(preview)]) == nil)
+    }
+
     @Test("실행 중 경로 이동은 원래 ID·순서·고정·제외를 보존한다")
     func movedApplicationRetainsUserPolicyAndOrder() throws {
         let first = app("first", path: "/Applications/First.app")
@@ -165,11 +195,11 @@ struct WorkspaceCatalogReconcilerTests {
         )
     }
 
-    private func snapshot(_ app: AppEntry, pid: Int32 = 1, regular: Bool = true) -> RunningAppSnapshot {
+    private func snapshot(_ app: AppEntry, pid: Int32 = 1, regular: Bool = true, active: Bool = false) -> RunningAppSnapshot {
         RunningAppSnapshot(
             processIdentifier: pid, bundleURL: URL(fileURLWithPath: app.bundlePath),
             bundleIdentifier: app.bundleIdentifier, name: app.name, isRegular: regular,
-            isActive: false, isHidden: false, launchDate: now
+            isActive: active, isHidden: false, launchDate: now
         )
     }
 

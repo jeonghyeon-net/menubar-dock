@@ -5,6 +5,28 @@ import Foundation
 /// 실행 스냅샷을 설치 앱에 연결한다. 경로 이동은 기존 항목의 위치만 갱신한다.
 @MainActor
 struct WorkspaceCatalogReconciler {
+    static func runningIDs(catalog: DockCatalog, snapshots: [RunningAppSnapshot]) -> Set<AppID> {
+        var snapshotsByPath: [String: [RunningAppSnapshot]] = [:]
+        for snapshot in snapshots {
+            guard let url = snapshot.bundleURL, url.isFileURL else { continue }
+            snapshotsByPath[canonicalPath(url.path), default: []].append(snapshot)
+        }
+        return Set(catalog.orderedApps.compactMap { app in
+            guard let candidates = snapshotsByPath[canonicalPath(app.bundlePath)],
+                  candidates.contains(where: { matchesIdentity(app, snapshot: $0) }) else { return nil }
+            return app.id
+        })
+    }
+
+    static func currentAppID(catalog: DockCatalog, snapshots: [RunningAppSnapshot]) -> AppID? {
+        guard let active = snapshots.first(where: \.isActive),
+              let url = active.bundleURL, url.isFileURL else { return nil }
+        let path = canonicalPath(url.path)
+        return catalog.orderedApps.first {
+            canonicalPath($0.bundlePath) == path && matchesIdentity($0, snapshot: active)
+        }?.id
+    }
+
     static func reconcile(
         catalog: inout DockCatalog,
         snapshots: [RunningAppSnapshot],

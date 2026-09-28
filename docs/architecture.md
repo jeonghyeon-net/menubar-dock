@@ -76,7 +76,7 @@ WorkspaceMonitor는 runningApplications KVO와 실행·종료·활성화·숨김
 
 앱 아이콘을 1x/2x 이미지로 합성해 **표준 NSStatusBarButton.image**에 전달한다. 앱마다 status item을 만들거나 길이 0인 항목을 숨기지 않는다. 공유 NSImage의 크기를 변경하지 않는다. 앱이 없는 경우와 compact 모드는 glyph 하나이며, 초과 앱은 overflow 메뉴에 표시한다.
 
-기본값은 아이콘 18pt, 간격 4pt, 끝 여백 합계 6pt, 최대 6개다. 실제 버튼 높이에 맞춰 icon 크기를 제한한다. 외관·배율·화면·접근성 표시 설정 변경 시 다시 그린다. 강제 aqua/darkAqua, 고정 대비 필터, 강제 active material을 사용하지 않는다. 시스템의 정상적인 비활성 dimming은 유지한다. [NSStatusItem](https://developer.apple.com/documentation/appkit/nsstatusitem).
+기본값은 아이콘 18pt, 간격 4pt, 끝 여백 합계 6pt, 최대 6개다. 실제 버튼 높이에 맞춰 icon 크기를 제한한다. 외관·배율·화면·접근성 표시 설정 변경 시 다시 그린다. 동일한 표시 상태의 알림은 건너뛰어 이미지 합성 자체가 appearance KVO를 다시 유발하는 렌더링 루프를 방지한다. 강제 aqua/darkAqua, 고정 대비 필터, 강제 active material을 사용하지 않는다. 시스템의 정상적인 비활성 dimming은 유지한다. [NSStatusItem](https://developer.apple.com/documentation/appkit/nsstatusitem).
 
 사용자 [회귀 참고 이미지](assets/inactive-display-reference.png)의 흰색 번짐과 청록색 편향은 실제 두 화면에서 비교해야 한다. 표준 렌더링 경로 채택만으로 그 현상이 해결됐다고 확정하지 않는다. 노치로 전체 항목이 가려질 수 있으므로 compact·표시 개수·Finder 재실행 설정 접근을 제공한다. `isVisible`은 가림 판정 수단이 아니다. [Apple 문서](https://developer.apple.com/documentation/appkit/nsstatusitem/isvisible).
 
