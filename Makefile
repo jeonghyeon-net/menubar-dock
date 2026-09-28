@@ -1,4 +1,4 @@
-.PHONY: build test app package run clean check smoke input-check settings-input-check
+.PHONY: build test app package run clean check smoke input-check settings-input-check version release-test package-test release-plan release-prepare release
 
 build:
 	swift build
@@ -7,10 +7,7 @@ test:
 	./scripts/test.sh
 
 check:
-	swift build -Xswiftc -warnings-as-errors
-	./scripts/test.sh
-	./scripts/check-status-input.sh
-	./scripts/check-settings-input.sh
+	./scripts/check.sh
 
 input-check:
 	./scripts/check-status-input.sh
@@ -32,3 +29,24 @@ run: app
 
 clean:
 	swift package clean
+
+version:
+	./scripts/version.sh
+
+release-test:
+	./scripts/test-release-metadata.sh
+	./scripts/test-package-metadata.sh
+	./scripts/test-release-publish.sh
+
+package-test:
+	./scripts/package.sh
+	./scripts/check-package.sh
+
+release-plan:
+	./scripts/release.sh --dry-run
+
+release-prepare:
+	./scripts/release.sh --prepare
+
+release:
+	./scripts/release.sh

@@ -10,7 +10,7 @@ cleanup() {
     rm -rf "$task_dir"
 }
 trap cleanup EXIT
-'build/Menu Bar Dock.app/Contents/MacOS/MenuBarDock' --smoke-test --data-directory "$task_dir" > "$task_dir/run.log" 2>&1 &
+"${MENUBAR_BUILD_DIR:-$task_root/build}/Menu Bar Dock.app/Contents/MacOS/MenuBarDock" --smoke-test --data-directory "$task_dir" > "$task_dir/run.log" 2>&1 &
 task_pid=$!
 for task_second in {1..20}; do
     if ! kill -0 "$task_pid" 2>/dev/null; then break; fi

@@ -17,14 +17,8 @@ description = "Swift Testing 실행; -- 뒤에 --filter 등 테스트 옵션 전
 run = "./scripts/test.sh"
 
 [tasks.check]
-description = "경고를 오류로 처리하는 빌드 후 자동 테스트"
-run = '''
-set -eu
-swift build -Xswiftc -warnings-as-errors
-./scripts/test.sh
-./scripts/check-status-input.sh
-./scripts/check-settings-input.sh
-'''
+description = "릴리스 도구·Swift 빌드·자동 테스트·네이티브 입력 검증"
+run = "./scripts/check.sh"
 
 [tasks."input-check"]
 description = "독립 메뉴 막대 버튼의 실제 AppKit 마우스 이벤트 경로 검증"
@@ -44,7 +38,7 @@ open "build/Menu Bar Dock.app"
 
 [tasks."self-test"]
 description = "이미 빌드한 앱 번들의 식별자와 리소스 검사"
-run = '"build/Menu Bar Dock.app/Contents/MacOS/MenuBarDock" --self-test'
+run = '"${MENUBAR_BUILD_DIR:-build}/Menu Bar Dock.app/Contents/MacOS/MenuBarDock" --self-test'
 
 [tasks.smoke]
 description = "앱 빌드 후 실제 시작·설정 저장·정상 종료 검사"
@@ -69,3 +63,48 @@ run = "swift package clean"
 [tasks."settings-input-check"]
 description = "슬라이더를 트랙 밖까지 드래그하며 손잡이 위치와 즉시 반영 검사"
 run = "./scripts/check-settings-input.sh"
+
+[tasks.version]
+description = "Git 태그에서 현재 또는 다음 패치 버전 계산"
+run = "./scripts/version.sh"
+
+[tasks."version-test"]
+description = "버전 계산과 릴리스 메타데이터 회귀 검사"
+run = "./scripts/test-release-metadata.sh"
+
+[tasks."release-notes"]
+description = "버전·커밋·배포 디렉터리에서 한국어 릴리스 노트 생성"
+run = "./scripts/release-notes.sh"
+
+[tasks."release-notes-test"]
+description = "변경 범위·Markdown·체크섬·서명 상태 회귀 검사"
+run = "./scripts/test-release-metadata.sh"
+
+[tasks."release-test"]
+description = "버전·노트·패키지 메타데이터·게시 실패 경로 로컬 검사"
+run = '''
+set -eu
+./scripts/test-release-metadata.sh
+./scripts/test-package-metadata.sh
+./scripts/test-release-publish.sh
+'''
+
+[tasks."package-test"]
+description = "앱 패키지 생성 후 ZIP·DMG·버전·서명·체크섬 검사"
+run = '''
+set -eu
+./scripts/package.sh
+./scripts/check-package.sh
+'''
+
+[tasks."release-plan"]
+description = "게시할 버전과 main·원격 상태만 확인; 빌드·태그·게시 없음"
+run = "./scripts/release.sh --dry-run"
+
+[tasks."release-prepare"]
+description = "릴리스 검사·패키징·한국어 노트 생성; 태그·게시 없음"
+run = "./scripts/release.sh --prepare"
+
+[tasks.release]
+description = "검증된 main을 태그와 첨부 파일이 있는 GitHub Release로 게시"
+run = "./scripts/release.sh"

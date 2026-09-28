@@ -6,6 +6,8 @@ Menu Bar Dock은 macOS 메뉴 막대에서 앱을 실행하는 네이티브 앱�
 
 - Apple Silicon Mac
 - Swift 6.2 이상의 Xcode 또는 Command Line Tools
+- Python 3.9 이상: 표준 라이브러리만 사용하는 개발·릴리스 도구
+- 인증된 GitHub CLI: 릴리스 계획 확인과 게시 시 필요
 - 로그인된 macOS 데스크톱 세션: AppKit 입력·창 테스트와 실제 앱 검증에 필요합니다.
 - [mise](https://mise.jdx.dev/): 저장소의 개발 명령을 한 곳에서 실행합니다.
 
@@ -43,7 +45,13 @@ Swift를 별도 런타임으로 설치하지 않습니다. macOS SDK와 함께 �
 | `mise run run` | 앱 번들을 빌드한 뒤 실행 |
 | `mise run self-test` | 이미 빌드한 번들의 식별자·리소스 검사 |
 | `mise run smoke` | 앱 빌드 후 임시 설정으로 시작·저장·정상 종료 검사 |
-| `mise run package` | ZIP·DMG·SHA-256 체크섬 생성 |
+| `mise run package` | ZIP·DMG·SHA-256 체크섬·manifest 생성 |
+| `mise run version` | 태그 기반 버전 계산 |
+| `mise run release-test` | 버전·노트·패키지 메타데이터·게시 경계 검사 |
+| `mise run package-test` | ZIP·DMG 실제 내용·서명·자체 진단 검사 |
+| `mise run release-plan` | 게시 조건과 대상 확인 |
+| `mise run release-prepare` | 전체 검사 후 패키지·한국어 노트 생성 |
+| `mise run release` | 태그·첨부 파일을 GitHub Release에 게시 |
 | `mise run notarize` | 준비된 인증서와 키체인 프로필로 서명·공증 |
 | `mise run clean` | SwiftPM 빌드 캐시 정리 |
 
@@ -89,3 +97,11 @@ README에는 시작 방법과 사용 흐름을, 상세 사용법은 [사용 안�
 ## 메뉴 막대 입력 회귀 검사
 
 `mise run input-check`는 로그인된 macOS GUI 세션에서 production 상태 항목 소스를 컴파일하고 실제 AppKit 누름·해제 이벤트를 전달합니다. 검사 중 임시 메뉴 막대 항목을 만들고 종료할 때 제거하며, 외부 앱을 실행하거나 사용자 설정을 변경하지 않습니다. `mise run check`에도 포함되어 있습니다.
+
+## 릴리스 운영
+
+[릴리스 결정](docs/adr/0004-local-versioned-releases.md)에 따라 전체 Git 이력의 정식 태그로 패치 버전을 계산합니다. 앱 복사본에 버전·빌드 번호·커밋을 기록하므로 일반 패치 릴리스마다 Info.plist를 수정하지 않습니다.
+
+변경한 동작은 CHANGELOG에 기록하고, 게시 본문은 실제 커밋 범위와 패키지의 검증된 메타데이터에서 생성합니다. 제목의 Markdown 구두점 때문에 릴리스 본문이 깨지지 않도록 생성기가 이스케이프합니다. 새로운 게시와 기존 설명 갱신에 같은 생성기를 사용합니다.
+
+패키징을 수정했다면 `mise run release-test`와 `mise run package-test`를 실행합니다. 게시 전에는 깨끗한 `main`을 원격과 맞추고 `mise run release-prepare` 결과를 검토합니다. 공개 릴리스의 태그나 바이너리는 교체하지 않습니다. 자세한 명령, 서명·공증과 실패 복구는 [빌드와 릴리스](docs/releasing.md)를 따릅니다.

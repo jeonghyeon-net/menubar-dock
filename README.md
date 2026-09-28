@@ -12,9 +12,18 @@ macOS Dock에 고정한 앱과 실행 중인 앱을 메뉴 막대에서 바로 �
 
 ## 시작하기
 
-Apple Silicon Mac과 Swift 6.2 이상의 Xcode 또는 Command Line Tools가 필요합니다. 빌드 대상은 macOS 14 이상이며, 실제 확인한 환경과 남은 검증 항목은 [검증 기록](docs/implementation-plan.md)에 있습니다.
+macOS 14 이상의 Apple Silicon Mac이 필요합니다. 배포 파일은 [GitHub Releases](https://github.com/jeonghyeon-net/menubar-dock/releases)에서 제공합니다. 같은 버전의 DMG·ZIP과 `SHA256SUMS`를 같은 폴더에 내려받아 확인한 뒤, DMG를 열고 앱을 `Applications`로 옮깁니다.
 
-[mise](https://mise.jdx.dev/)가 설치되어 있다면 다음 명령으로 앱을 만듭니다.
+```sh
+shasum -a 256 -c SHA256SUMS
+```
+
+서명·공증 상태와 대상 커밋은 각 릴리스 본문에 표시합니다. 첫 실행에서는 설정 창이 열립니다. 기존 Menu Bar Dock을 사용 중이라면 먼저 종료해 주세요.
+
+<details>
+<summary>소스에서 빌드하기</summary>
+
+Swift 6.2 이상의 Xcode 또는 Command Line Tools, Python 3.9 이상이 필요합니다. [mise](https://mise.jdx.dev/)가 설치되어 있다면 다음 명령을 실행합니다.
 
 ```sh
 git clone https://github.com/jeonghyeon-net/menubar-dock.git
@@ -24,11 +33,13 @@ mise run app
 open "build/Menu Bar Dock.app"
 ```
 
-`mise`는 저장소의 개발 명령을 실행합니다. Swift와 macOS SDK는 `xcode-select`로 선택된 Apple 도구 체인을 사용하며, 외부 Swift 패키지는 내려받지 않습니다. `mise` 없이 시작하려면 `make app`을 실행해도 같은 빌드 스크립트를 사용합니다.
+Swift와 macOS SDK는 `xcode-select`로 선택한 Apple 도구 체인을 사용하며 외부 Swift 패키지는 내려받지 않습니다. `mise` 없이 `make app`을 실행해도 같은 스크립트를 사용합니다. Python은 개발·배포 도구에만 필요하며 앱에는 포함하지 않습니다.
 
-첫 실행에서는 설정 창이 열립니다. 기존 Menu Bar Dock을 사용 중이라면 먼저 종료해 주세요. 계속 사용할 앱은 `Applications` 폴더로 옮긴 뒤 실행합니다. 서명 인증서를 지정하지 않은 로컬 빌드는 ad-hoc 서명이며, Developer ID 서명·공증을 거친 공개 배포본과 구분합니다.
+서명 인증서를 지정하지 않은 로컬 빌드는 ad-hoc 서명입니다. 실제 확인한 환경과 남은 검증 항목은 [검증 기록](docs/implementation-plan.md)에 있습니다.
 
-현재 버전은 **1.0.3**입니다. `mise run package`를 실행하면 `dist/MenuBarDock-1.0.3-arm64.dmg`와 ZIP을 만듭니다. 서명과 배포 절차는 [빌드와 배포](docs/releasing.md)를 참고하세요.
+</details>
+
+버전은 `mise run version`으로 확인합니다. 패키지 생성·검사·한국어 릴리스 노트·게시 명령은 [빌드와 릴리스](docs/releasing.md)에 정리되어 있습니다.
 
 ## 앱 열기와 설정
 
@@ -84,7 +95,12 @@ macOS Dock에 고정한 앱과 Finder는 시작할 때 자동으로 가져옵니
 | `mise run app` | `build/Menu Bar Dock.app` 생성 |
 | `mise run run` | 앱을 빌드한 뒤 실행 |
 | `mise run smoke` | 앱을 빌드한 뒤 실제 시작·설정 저장·정상 종료 검사 |
-| `mise run package` | `dist/`에 ZIP·DMG·체크섬 생성 |
+| `mise run package` | `dist/packages/<버전>/`에 ZIP·DMG·체크섬·manifest 생성 |
+| `mise run version` | Git 태그 기반 현재·다음 패치 버전 확인 |
+| `mise run package-test` | ZIP·DMG 내부 앱과 서명·버전·체크섬 검사 |
+| `mise run release-plan` | 게시할 버전·커밋·원격 상태 확인 |
+| `mise run release-prepare` | 릴리스 검사·패키징·한국어 노트 생성 |
+| `mise run release` | 검증한 `main`의 태그·배포 파일을 GitHub Release에 게시 |
 
 명령 정의는 [mise.toml](mise.toml), 빌드·테스트·패키징 구현은 [scripts/](scripts/)에 있습니다. 자동 테스트와 실기기 확인 범위는 구분해 검증 기록에 남깁니다.
 

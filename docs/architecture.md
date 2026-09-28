@@ -24,7 +24,7 @@
 | 빌드·배포 | Swift Package, mise 로컬 검증, 앱 번들·DMG 스크립트 |
 | 업데이트 | 사용자가 요청할 때 GitHub Releases 확인 |
 
-외부 패키지 의존성은 없다. [빌드 결정](adr/0001-native-package-app.md), [AppKit·단축키 결정](adr/0002-appkit-and-system-hotkeys.md), [업데이트 결정](adr/0003-explicit-update-check.md)에 근거와 트레이드오프를 남겼다. Developer ID 인증서가 있으면 Hardened Runtime 서명과 공증을 수행할 수 있다. 인증서 없는 빌드는 ad-hoc 서명이다.
+외부 패키지 의존성은 없다. [빌드 결정](adr/0001-native-package-app.md), [AppKit·단축키 결정](adr/0002-appkit-and-system-hotkeys.md), [업데이트 결정](adr/0003-explicit-update-check.md), [로컬 릴리스 결정](adr/0004-local-versioned-releases.md)에 근거와 트레이드오프를 남겼다. Developer ID 인증서가 있으면 Hardened Runtime 서명과 공증을 수행할 수 있다. 인증서 없는 빌드는 ad-hoc 서명이다.
 
 ## 경계와 데이터 흐름
 
@@ -129,3 +129,7 @@ OSSignposter에 event-to-render, switcher-open, launch-request 구간을 남긴�
 `SystemDockCatalogImporter`는 같은 설치 경로·호환되는 identifier를 기존 ID에 연결한다. 새로 발견한 Dock 항목만 고정하며, `knownSystemDockPaths`를 저장하여 이후 사용자의 고정 해제를 되돌리지 않는다. 기존 순서·제외는 보존하고 새 항목만 Dock 순서대로 추가한다. 해석 실패한 경로는 성공 기록에서 제외하여 다음 시작·변경 이벤트 때 재시도한다.
 
 `−`는 `apps`와 `order`에서 항목을 제거하고 `removedApps`에 삭제 기록을 보존한다. 자동 실행 감지와 Dock 동기화의 upsert는 같은 설치를 되살리지 않는다. `+`는 명시적 복원 명령으로 기존 ID를 재사용한다. 중복 항목 정리는 삭제 기록을 만들지 않는다. 세 필드는 기존 schema 2 파일에 없는 경우 기본값으로 읽는다.
+
+## 릴리스 도구
+
+배포 앱과 분리된 Python 3 표준 라이브러리 도구가 Git 태그 기반 버전, 한국어 변경 노트, 패키지 manifest와 게시 순서를 관리한다. `release.py`는 검증된 `main`에서만 태그·초안·첨부 파일을 생성하고, 업로드한 파일을 다시 내려받아 일치할 때 공개한다. 앱은 기존 `ReleaseChecker`로 공개된 최신 정식 릴리스를 읽으며 자동 설치는 하지 않는다. 명령과 파일 계약은 [배포 안내](releasing.md), 실행 결과는 [릴리스 도구 검증](verification/2026-09-28-release-pipeline.md)에 정리한다.
