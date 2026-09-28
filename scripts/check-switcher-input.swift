@@ -51,7 +51,7 @@ private final class SearchInputProbe {
     func run() async throws {
         model.apps = entries
         model.items = entries.map { DockItem(app: $0, isRunning: false) }
-        show()
+        try await show()
         try saveSnapshot(option: "--idle-snapshot")
         let input = field()
         let originalEditor = editor()
@@ -90,13 +90,13 @@ private final class SearchInputProbe {
         require(openedResults == [results[1]] && !switcher.isVisible, "Enter가 현재 검색 결과를 정확히 실행하지 않음")
         require(model.apps == entries, "검색 결과가 저장된 앱 목록을 변경함")
 
-        show()
+        try await show()
         editor().insertText("same", replacementRange: NSRange(location: 0, length: 0))
         try await settleSearch("same", count: 3)
         let cancellationCount = search.cancelCount
         switcher.close()
         require(search.cancelCount > cancellationCount, "창 닫을 때 검색 취소 누락")
-        show()
+        try await show()
         editor().insertText("same", replacementRange: NSRange(location: 0, length: 0))
         try await settleSearch("same", count: 4)
         search.deliver([results[0]], request: 2)
@@ -107,11 +107,11 @@ private final class SearchInputProbe {
         require(field().stringValue.isEmpty && switcher.isVisible, "첫 Escape가 검색어만 비우지 않음")
         try await key(36, characters: "\r")
         require(openedApps == [entries[1].id], "검색 종료 후 원래 앱 선택을 복원하지 않음")
-        show()
+        try await show()
         try await key(53, characters: "\u{1b}")
         require(!switcher.isVisible, "빈 검색에서 Escape로 닫히지 않음")
 
-        show()
+        try await show()
         let compositionEditor = editor()
         compositionEditor.setMarkedText("ㅎ", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: 0, length: 0))
         require(compositionEditor.hasMarkedText(), "한글 조합 텍스트가 생성되지 않음")
@@ -130,11 +130,15 @@ private final class SearchInputProbe {
         exit(0)
     }
 
-    private func show() {
+    private func show() async throws {
         switcher.show(direction: 1, currentID: entries[0].id)
         window = NSApp.windows.first { $0.title == "앱 선택" && $0.isVisible }
         require(window != nil, "선택 창 없음")
         require(window?.makeFirstResponder(field()) == true, "검색창을 first responder로 설정할 수 없음")
+        try await waitUntil("선택 창의 키보드 입력 준비") {
+            guard let window, let editor = field().currentEditor() as? NSTextView else { return false }
+            return window.isKeyWindow && NSApp.keyWindow === window && window.firstResponder === editor
+        }
     }
 
     private func field() -> NSSearchField {
@@ -182,9 +186,24 @@ private final class SearchInputProbe {
     }
 
     private func settleSearch(_ query: String, count: Int) async throws {
-        try await Task.sleep(for: .milliseconds(150))
+        // 디바운스와 AppKit 입력 처리는 비동기다. 경과 시간 대신 요청 도착을 확인한다.
+        try await waitUntil("검색 요청 \(count)회 도착") {
+            require(search.queries.count <= count, "예상보다 많은 검색 요청")
+            guard search.queries.count == count else { return false }
+            require(search.queries.last == query, "검색 요청의 검색어 불일치")
+            return field().stringValue == query && editor().string == query && !editor().hasMarkedText()
+        }
         require(search.queries.count == count && search.queries.last == query,
                 "검색어 또는 요청 수 불일치: 기대 \(count)회, 실제 \(search.queries.count)회, 창 \(switcher.isVisible), 조합 중 \(editor().hasMarkedText())")
+    }
+
+    private func waitUntil(_ description: String, condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !condition() {
+            guard ContinuousClock.now < deadline else { fail("\(description) 제한 시간 초과") }
+            // 검사 프로세스만 잠깐 양보하여 AppKit 이벤트와 제품의 디바운스 작업을 진행한다.
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     private func clickEmptyResultsArea() async throws {
@@ -223,9 +242,15 @@ private final class SearchInputProbe {
     }
 
     func fail(_ message: String) -> Never {
-        print("실패: \(message)")
+        print("실패: \(message), \(inputState())")
         switcher.tearDown()
         exit(1)
+    }
+
+    private func inputState() -> String {
+        let input = probeDescendants(window?.contentView).compactMap { $0 as? NSSearchField }.first
+        let editor = input?.currentEditor() as? NSTextView
+        return "active=\(NSApp.isActive) key=\(window?.isKeyWindow == true) appKey=\(NSApp.keyWindow === window) editorFocused=\(editor != nil && window?.firstResponder === editor) field=\(String(reflecting: input?.stringValue)) editor=\(String(reflecting: editor?.string)) marked=\(editor?.hasMarkedText() == true) source=\(NSTextInputContext.current?.selectedKeyboardInputSource ?? "nil") requests=\(search.queries)"
     }
 }
 
