@@ -69,3 +69,9 @@ Mach-O universal binary: x86_64 + arm64
 조사한 tree에서는 LICENSE/COPYING 파일을 찾지 못했다. 구현과 에셋은 새로 작성하고 원본 코드를 복사하는 계획은 두지 않는다. 기존 앱의 동작과 이슈는 요구사항·회귀 사례의 참고 자료로 사용한다.
 
 원본에 대한 성능 저하, 전체 crash 원인, 모든 디스플레이 버그가 확정됐다고 주장하지 않는다. 새 구현도 [검증 계획](implementation-plan.md)의 실기기 조건을 통과해야 한다.
+
+## 1.0.2 크기와 입력 재검토
+
+원본은 40pt `NSImageView`를 30pt 상태 항목 영역에 배치한다. 이 크기를 표준 `NSStatusBarButton.image`에 그대로 적용한 1.0.1에서는 이미지가 실제 버튼보다 커졌다. 1.0.2는 24pt를 기본값으로 사용하고 실제 버튼 높이·너비에 맞춰 이미지를 제한한다. 크기 수치만 원본과 같다고 외관이 같아지는 것은 아니다.
+
+원본의 왼쪽·오른쪽 마우스 이벤트 구분도 복원했다. 표준 버튼의 `sendAction(on:)`에 두 release 이벤트를 등록하고, 오른쪽 클릭은 `NSMenu`를 버튼에 고정해 표시한다. 왼쪽 클릭과 접근성 press는 앱 실행을 유지한다. [Apple의 NSStatusItem 문서](https://developer.apple.com/documentation/appkit/nsstatusitem/sendaction(on:))에서 안내하는 `button` API를 사용한다.
