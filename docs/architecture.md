@@ -15,7 +15,7 @@
 | 언어·플랫폼 | Swift 6 모드, Swift 6.2+, macOS 14+, arm64 |
 | 앱 수명 | NSApplicationDelegate, LSUIElement |
 | 메뉴 막대 | 앱별 NSStatusItem과 NSStatusBarButton |
-| 설정·선택 | AppKit NSTabView / NSTableView / NSPanel |
+| 설정·선택 | AppKit 단일 설정 창 / NSTableView / NSPanel |
 | OS 연동 | NSWorkspace, NSRunningApplication, SMAppService |
 | 단축키 | Carbon RegisterEventHotKey, 조합만 등록 |
 | 저장 | Codable JSON, actor, 원자 교체, 정상 백업 |
@@ -58,13 +58,13 @@ flowchart TD
 
 `AppID`는 설치 항목의 영속 UUID다. PID·앱 이름·bundle identifier를 영속 ID로 쓰지 않는다. `AppEntry`에 bundle 경로·identifier·bookmark를 저장한다. 같은 identifier라도 다른 설치 경로이면 서로 다른 항목이다. 같은 정규 경로·identifier의 저장 중복은 처음 배치한 ID와 순서에 합치고, 고정·제외 정책과 최근 bookmark를 보존한다. bookmark로 이동한 앱을 복원하며, 경로를 잃으면 설정에서 다시 지정한다. 검증 가능한 앱 번들 URL이 없는 프로세스는 목록에 넣지 않는다.
 
-`DockConfiguration`은 항목 목록과 독립적인 `order: [AppID]`를 갖는다. 새 항목은 끝에 추가하며 기존 항목의 상대 순서를 보존한다. 중복 이벤트로 고정·제외 상태를 덮지 않는다. 비고정·비실행·비제외 이력은 90일/256개 상한으로 정리하고 고정·제외·실행 항목은 보호한다. 삭제와 제외는 구별한다. 실행 중 앱을 목록에서 삭제하면 자동 재발견을 막기 위해 제외로 남긴다.
+`DockConfiguration`은 항목 목록과 독립적인 `order: [AppID]`를 갖는다. 새 항목은 끝에 추가하며 기존 항목의 상대 순서를 보존한다. 중복 이벤트로 고정·제외 상태를 덮지 않는다. 비고정·비실행·비제외 이력은 90일/256개 상한으로 정리하고 고정·제외·실행 항목은 보호한다. 삭제와 제외는 구별한다. 실행 중 앱도 삭제하면 목록에서 제거하고 별도 삭제 기록으로 자동 재발견을 막는다.
 
 실행 상태는 `RunningAppSnapshot`으로 분리한다. PID에 bundle URL과 launchDate를 함께 비교하여 PID가 재사용된 뒤 다른 프로세스를 숨기거나 종료하지 않는다. 모든 AppKit 작업은 MainActor에서 수행한다. 파일 저장은 actor에 보내고 늦은 revision을 거절한다.
 
 ## 시작·이벤트·종료
 
-설정 로드·v1 마이그레이션 → bookmark 복구 → UI controller 준비 → 관찰 시작·초기 스냅샷 → 최종 표시 목록 → 앱별 status item 게시 순서다. 초기 빈 슬롯을 여러 개 생성하지 않는다. 시작 중 Finder 재실행 요청은 설정이 준비될 때 처리한다.
+설정 로드·v1 마이그레이션 → bookmark 복구 → macOS Dock 감시·초기 반영 → UI controller 준비 → 관찰 시작·초기 스냅샷 → 최종 표시 목록 → 앱별 status item 게시 순서다. 초기 빈 슬롯을 여러 개 생성하지 않는다. 시작 중 Finder 재실행 요청은 설정이 준비될 때 처리한다.
 
 WorkspaceMonitor는 runningApplications KVO와 실행·종료·활성화·숨김·wake 알림을 사용한다. 활성화 알림 payload를 보존하고 accessor를 다시 읽어 덮지 않는다. 초기·wake 등에서 스냅샷을 조정하며 주기 polling은 없다. [실행 앱 KVO](https://developer.apple.com/documentation/appkit/nsworkspace/runningapplications), [종료 알림의 범위](https://developer.apple.com/documentation/appkit/nsworkspace/didterminateapplicationnotification).
 
@@ -76,9 +76,9 @@ WorkspaceMonitor는 runningApplications KVO와 실행·종료·활성화·숨김
 
 원본 Menu-Bar-Dock의 `MenuBarItem` / `MenuBarItems`처럼 물리적 슬롯과 앱 항목을 분리한다. 유효한 메뉴 막대 좌표가 모두 준비되면 슬롯을 왼쪽부터 정렬하고 저장된 도메인 순서를 대응시킨다. 초기 배치에는 슬롯 번호 순서를 사용한다. 각 슬롯의 autosaveName은 안정적으로 유지한다. 앱 수가 줄면 불필요한 상태 항목을 제거하며 길이 0인 예약 항목은 두지 않는다.
 
-기본 아이콘은 24pt(16~32pt), 슬롯 너비는 30pt(22~60pt)다. 원본의 custom image view와 표준 버튼의 렌더링 경계는 다르므로 원본의 40pt 수치를 그대로 사용하지 않는다. 표시 이미지는 실제 버튼 높이와 너비에서 최소 여백을 뺀 크기로 제한한다. 이미지 크기를 바꿀 때는 독립 복사본을 사용한다. 강제 aqua/darkAqua, 고정 대비 필터, 강제 active material을 사용하지 않는다. 표준 시스템 버튼이 외관과 입력을 담당한다.
+기본 아이콘은 24pt(16~32pt), 추가 간격은 0pt(0~28pt)다. 원본의 custom image view와 표준 버튼의 렌더링 경계는 다르므로 원본의 40pt 수치를 그대로 사용하지 않는다. 이미지에는 요청한 크기를 그대로 적용한다. 표준 버튼이 이미지 크기에 맞춰 높이를 결정하므로 이전 버튼 높이를 크기의 상한으로 사용하지 않는다. 영역 너비는 아이콘 크기와 추가 간격의 합이다. 0pt에서는 앱이 여백을 추가하지 않으며 macOS가 각 독립 상태 항목에 붙이는 기본 여백은 남는다. 아이콘 크기를 바꿔도 추가 간격을 보존한다. 이미지 크기를 바꿀 때는 독립 복사본을 사용한다. 강제 aqua/darkAqua, 고정 대비 필터, 강제 active material을 사용하지 않는다. 표준 시스템 버튼이 외관과 입력을 담당한다.
 
-상단에는 앱 아이콘만 표시한다. 관리용 말줄임표나 런처 glyph는 없다. 표시 개수를 넘긴 앱은 Option+Tab 선택 패널에서 열고, 우클릭 또는 Control-클릭 메뉴에서 설정을 열고, 크기 및 간격 항목은 표시 탭으로 바로 이동한다. Finder에서 앱 재실행 또는 선택 패널의 톱니 버튼으로도 설정을 연다. 앱이 없으면 상태 항목도 없다. 첫 실행은 설정을 열어 앱을 추가할 수 있게 한다.
+상단에는 앱 아이콘만 표시한다. 관리용 말줄임표나 런처 glyph는 없다. 표시 개수를 넘긴 앱은 Option+Tab 선택 패널에서 열고, 우클릭 또는 Control-클릭 메뉴에서 모든 옵션이 있는 단일 설정 창을 연다. Finder에서 앱 재실행 또는 선택 패널의 톱니 버튼으로도 설정을 연다. 앱이 없으면 상태 항목도 없다. 첫 실행은 설정을 열어 앱을 추가할 수 있게 한다.
 
 사용자 [회귀 참고 이미지](assets/inactive-display-reference.png)의 흰색 번짐과 청록색 편향은 두 화면에서 비교해야 한다. 외관 강제 지정을 제거한 것만으로 이 문제가 해결됐다고 확정하지 않는다. 노치나 메뉴 폭 때문에 항목이 가려지면 표시 개수를 줄이거나 키보드 선택 패널을 사용한다. `isVisible`은 가림 판정 수단이 아니다. [Apple 문서](https://developer.apple.com/documentation/appkit/nsstatusitem/isvisible).
 
@@ -96,7 +96,7 @@ ApplicationLauncher는 같은 설치 경로의 진행 중 요청을 합친다. N
 
 ## 저장·보안·배포
 
-`~/Library/Application Support/net.jeonghyeon.MenuBarDock/preferences.json`에 schema 2, 앱, order, 표시 설정을 저장한다. 1.0.1에서 저장한 40pt 기본값은 로드 시 24pt로 보정하며 앱·순서·고정·제외는 유지한다. 단축키 조합만 UserDefaults에 단독 저장한다. 로그인 상태는 SMAppService에서 읽는다.
+`~/Library/Application Support/net.jeonghyeon.MenuBarDock/preferences.json`에 schema 2, 앱, order, 표시 설정을 저장한다. 1.0.1에서 저장한 40pt 기본값은 로드 시 24pt로 보정하며 앱·순서·고정·제외는 유지한다. 아이콘보다 좁은 기존 영역 너비는 손상 경고 없이 넓힌다. 단축키 조합만 UserDefaults에 단독 저장한다. 로그인 상태는 SMAppService에서 읽는다.
 
 - 파일은 원자 교체, 정상 백업, 오래된 revision 거부로 보호한다.
 - 손상 JSON은 별도 파일로 보존하고 백업 또는 기본값으로 복구한다.
@@ -115,3 +115,17 @@ ApplicationLauncher는 같은 설치 경로의 진행 중 요청을 합친다. N
 OSSignposter에 event-to-render, switcher-open, launch-request 구간을 남긴다. Release 앱에서 idle CPU·메모리·키 입력 지연을 측정하며 타 앱의 시작 시간과 우리 요청 전달 시간을 구분한다. Instruments 장시간 사용, 실제 두 화면/Spaces/로그인 부팅 검증은 자동 단위 테스트와 별도다.
 
 소스는 Sources의 다섯 모듈, Tests의 대응 테스트, Config/Info.plist, scripts, docs로 구성한다. 프로젝트는 main 하나로 운영한다. GitHub Actions는 사용하지 않으며 mise 또는 Makefile의 명시적인 로컬 명령으로 빌드·테스트·패키징·번들 self-test를 수행한다.
+
+## 단일 설정 창과 슬라이더 입력
+
+설정에는 탭이나 카드 배경을 두지 않는다. 위쪽 앱 목록만 스크롤하고 아래쪽 크기·자동 표시·단축키와 하단 도움말을 한 창에서 사용한다. 기본 크기는 540×600pt다.
+
+슬라이더가 추적 중일 때는 저장값을 손잡이에 되쓰지 않는다. 손잡이는 AppKit이 추적하고 표시 레이블과 명령 값만 정수로 변환한다. 같은 값의 로그인·단축키 상태를 중복 게시하지 않아 불필요한 전체 설정 갱신도 줄인다.
+
+## macOS Dock 자동 감지
+
+`SystemDockReader`는 com.apple.dock의 persistent-apps를 읽고 Finder와 설치된 로컬 앱 URL만 반환한다. `SystemDockMonitor`는 설정 파일과 부모 디렉터리의 변경 이벤트를 감시하여 원자 교체 뒤에도 갱신한다. 짧은 debounce와 실제 앱 목록 비교를 거치며 polling이나 Dock 파일 변경은 하지 않는다.
+
+`SystemDockCatalogImporter`는 같은 설치 경로·호환되는 identifier를 기존 ID에 연결한다. 새로 발견한 Dock 항목만 고정하며, `knownSystemDockPaths`를 저장하여 이후 사용자의 고정 해제를 되돌리지 않는다. 기존 순서·제외는 보존하고 새 항목만 Dock 순서대로 추가한다. 해석 실패한 경로는 성공 기록에서 제외하여 다음 시작·변경 이벤트 때 재시도한다.
+
+`−`는 `apps`와 `order`에서 항목을 제거하고 `removedApps`에 삭제 기록을 보존한다. 자동 실행 감지와 Dock 동기화의 upsert는 같은 설치를 되살리지 않는다. `+`는 명시적 복원 명령으로 기존 ID를 재사용한다. 중복 항목 정리는 삭제 기록을 만들지 않는다. 세 필드는 기존 schema 2 파일에 없는 경우 기본값으로 읽는다.

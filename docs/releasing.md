@@ -15,12 +15,12 @@ mise run smoke
 shasum -a 256 -c dist/SHA256SUMS
 ```
 
-`mise run package`는 다음 파일을 만듭니다. 아래는 현재 **1.0.1**의 예시이며 파일명은 `Config/Info.plist`의 `CFBundleShortVersionString` 값을 따릅니다.
+`mise run package`는 다음 파일을 만듭니다. 아래는 현재 **1.0.3**의 예시이며 파일명은 `Config/Info.plist`의 `CFBundleShortVersionString` 값을 따릅니다.
 
 ```text
 build/Menu Bar Dock.app
-dist/MenuBarDock-1.0.1-arm64.zip
-dist/MenuBarDock-1.0.1-arm64.dmg
+dist/MenuBarDock-1.0.3-arm64.zip
+dist/MenuBarDock-1.0.3-arm64.dmg
 dist/SHA256SUMS
 ```
 
@@ -48,7 +48,7 @@ mise run notarize
 2. 로컬 검사와 변경 범위에 필요한 실제 동작을 확인하고, 검증 기록에 환경·명령·결과·미검증 범위를 적습니다.
 3. 검증한 변경을 커밋·푸시하고, 게시할 커밋과 작업 디렉터리의 상태를 확인합니다.
 4. 최종 배포 파일의 서명·공증·체크섬과 설치 후 동작을 확인합니다.
-5. 게시하기로 정한 커밋에 버전 태그(예: `v1.0.1`)를 만들고 GitHub Release에 ZIP·DMG·체크섬을 첨부합니다.
+5. 게시하기로 정한 커밋에 버전 태그(예: `v1.0.3`)를 만들고 GitHub Release에 ZIP·DMG·체크섬을 첨부합니다.
 
 일반 커밋이나 푸시는 릴리스를 게시하지 않습니다. 저장소에 GitHub Actions workflow나 자동 게시 작업을 추가하지 않습니다. 배포 파일을 확인하려고 임시 공개 릴리스를 만들거나, 이미 게시한 버전의 바이너리를 같은 이름으로 교체하지 않습니다.
 

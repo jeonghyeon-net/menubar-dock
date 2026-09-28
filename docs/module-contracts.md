@@ -4,10 +4,10 @@
 
 - `AppID`: String rawValue, Hashable/Codable/Sendable, 기본 생성자는 UUID. `init(rawValue:)`.
 - `AppEntry`: Identifiable/Codable/Equatable/Sendable. public var `id: AppID`, `name: String`, `bundleIdentifier: String?`, `bundlePath: String`, `bookmarkData: Data?`, `isPinned: Bool`, `isExcluded: Bool`, `lastSeen: Date`.
-- `DockPreferences`: Codable/Equatable/Sendable. public var `iconSize: Double = 24`, `slotWidth: Double = 30`, `maxVisibleApps: Int = 6`, `showsRunningApps: Bool = true`, `shortcutEnabled: Bool = true`. 검증/정규화 제공.
-- `DockConfiguration`: Codable/Equatable/Sendable. `schemaVersion: Int`, `apps: [AppEntry]`, `order: [AppID]`, `preferences: DockPreferences`. 기본 생성자. 중복·범위 정규화.
+- `DockPreferences`: Codable/Equatable/Sendable. public var `iconSize: Double = 24`, `slotWidth: Double = 24`, `maxVisibleApps: Int = 6`, `showsRunningApps: Bool = true`, `shortcutEnabled: Bool = true`. 검증/정규화 제공. `slotWidth >= iconSize`를 보장한다.
+- `DockConfiguration`: Codable/Equatable/Sendable. `schemaVersion: Int`, `apps: [AppEntry]`, `order: [AppID]`, `preferences: DockPreferences`, `removedApps: [AppEntry]`, `knownSystemDockPaths: [String]`. 기본 생성자. 중복·범위 정규화.
 - `DockItem`: Equatable/Sendable/Identifiable. `app: AppEntry`, `isRunning: Bool`, id는 app.id.
-- `DockCatalog`: 값 타입 aggregate. `configuration: DockConfiguration`, init(configuration:), upsert(AppEntry), pin(AppID, Bool), exclude(AppID, Bool), remove(AppID), move(fromOffsets: IndexSet, toOffset: Int), updatePreferences(DockPreferences), orderedApps, visibleItems(runningIDs: Set<AppID>). 순서 불변식 보장.
+- `DockCatalog`: 값 타입 aggregate. `configuration: DockConfiguration`, init(configuration:), upsert(AppEntry), pin(AppID, Bool), exclude(AppID, Bool), remove(AppID, suppressRediscovery: Bool = true), upsertRestoring(AppEntry), isRemoved(AppEntry), move(fromOffsets: IndexSet, toOffset: Int), updatePreferences(DockPreferences), orderedApps, visibleItems(runningIDs: Set<AppID>). 순서 불변식 보장.
 - `SwitcherSession`: 순서/선택만 관리. init(ids: [AppID], currentID: AppID?, direction: Int), `selectedID`, `ids`, move(Int), reconcile(validIDs: Set<AppID>).
 
 ## DockPersistence
@@ -50,3 +50,5 @@ AppKit/Carbon 경계다. 다른 로컬 target에 의존하지 않는다.
 `WorkspaceCatalogReconciler`는 관찰 스냅샷을 catalog에 병합하고 경로 이동 시 bookmark로 기존 ID를 복구한다. `ReleaseChecker` actor는 사용자 요청 때만 HTTPS API를 읽고 검증된 릴리스 페이지를 반환한다. `ApplicationMenu`는 표준 AppKit 앱·편집·윈도우 메뉴를 구성한다.
 
 전체 소스 계약은 Swift compiler와 대응 Tests target으로 검증한다. 과거 설계의 AppStore/reducer/effect 명칭 대신 현재 구현은 ApplicationController + DockCatalog의 값 연산을 사용한다.
+
+`SystemDockReader.applicationURLs()`는 macOS Dock을 변경하지 않고 Finder와 고정 앱의 로컬 URL을 순서대로 읽는다. 조립 계층의 `SystemDockCatalogImporter`가 기존 ID·순서·제외를 유지해 고정 목록에 합친다. `SystemDockMonitor.start(onChange:)`는 파일 변경 감시를 시작하며 실패 시 오류를 던진다. `stop()`은 감시와 대기 작업을 정리한다. 삭제 기록과 기존 Dock 경로는 `removedApps`·`knownSystemDockPaths`에 저장한다.

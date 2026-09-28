@@ -75,3 +75,7 @@ Mach-O universal binary: x86_64 + arm64
 원본은 40pt `NSImageView`를 30pt 상태 항목 영역에 배치한다. 이 크기를 표준 `NSStatusBarButton.image`에 그대로 적용한 1.0.1에서는 이미지가 실제 버튼보다 커졌다. 1.0.2는 24pt를 기본값으로 사용하고 실제 버튼 높이·너비에 맞춰 이미지를 제한한다. 크기 수치만 원본과 같다고 외관이 같아지는 것은 아니다.
 
 원본의 왼쪽·오른쪽 마우스 이벤트 구분도 복원했다. 표준 버튼의 `sendAction(on:)`에 두 release 이벤트를 등록하고, 오른쪽 클릭은 `NSMenu`를 버튼에 고정해 표시한다. 왼쪽 클릭과 접근성 press는 앱 실행을 유지한다. [Apple의 NSStatusItem 문서](https://developer.apple.com/documentation/appkit/nsstatusitem/sendaction(on:))에서 안내하는 `button` API를 사용한다.
+
+## 1.0.3 실제 렌더링 재검증
+
+1.0.2의 버튼 높이 제한은 이전 이미지로 결정된 높이를 다시 상한으로 삼아 크기 증가를 막았다. 해당 제한을 제거하고 16~32pt 이미지 사각형과 실제 렌더 픽셀 면적이 함께 증가하는지 네이티브 실행 루프에서 검사한다. 앱별 시스템 버튼을 유지하며 앱이 추가하는 간격은 0pt부터 조절한다. 자세한 결과는 [1.0.3 검증](verification/1.0.3.md)에 기록한다.
