@@ -56,6 +56,10 @@ class FakeCommands:
         self.change_commit_after_checks = False
         self.manifest_commit = COMMIT
         self.manifest_version = VERSION
+        self.visibility_after_write = {}
+        self.pending_visibility = []
+        self.last_write = None
+        self.visibility_reads = []
 
     def create_package(self):
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -131,6 +135,7 @@ class FakeCommands:
                 return self.result(args, stderr="gh: Not Found (HTTP 404)", code=1)
             return self.result(args, json.dumps(self.release))
         if args == ("gh", "api", f"repos/{RELEASE.REPOSITORY}/releases?per_page=100", "--paginate", "--slurp"):
+            self.visibility_reads.append(self.last_write)
             if self.lookup_error:
                 return self.result(args, stderr=self.lookup_error, code=1)
             # 같은 태그를 다른 게시자가 공개한 상태가 최종 원격 조회에 나타난다.
@@ -138,14 +143,21 @@ class FakeCommands:
                 self.release["draft"] = False
             if self.release and self.replace_after_readback and self.full_readback_finished:
                 self.release["id"] = 456
+            visible = self.release
+            if self.pending_visibility:
+                response = self.pending_visibility.pop(0)
+                if isinstance(response, str):
+                    return self.result(args, stderr=response, code=1)
+                visible = response(copy.deepcopy(self.release)) if callable(response) else response
             pages = copy.deepcopy(self.release_pages_before_target)
-            pages.append([self.release] if self.release else [])
+            pages.append([visible] if visible else [])
             return self.result(args, json.dumps(pages))
         if args[:3] == ("gh", "release", "create"):
             self.release = {
                 "id": 123, "tag_name": TAG, "draft": "--draft" in args, "prerelease": False, "assets": [],
                 "html_url": f"https://github.com/{RELEASE.REPOSITORY}/releases/tag/{TAG}",
             }
+            self.arm_visibility("create")
             return self.result(args)
         if args[:3] == ("gh", "release", "upload"):
             path = Path(args[4])
@@ -153,6 +165,7 @@ class FakeCommands:
                 raise AssertionError("기존 첨부 파일을 다시 업로드했습니다.")
             self.remote_files[path.name] = path.read_bytes()
             self.release["assets"].append({"name": path.name, "state": "uploaded"})
+            self.arm_visibility("upload")
             return self.result(args)
         if args[:3] == ("gh", "release", "download"):
             destination = Path(args[args.index("--dir") + 1])
@@ -167,6 +180,7 @@ class FakeCommands:
             return self.result(args)
         if args[:3] == ("gh", "release", "edit"):
             self.release["draft"] = False
+            self.arm_visibility("edit")
             return self.result(args)
         if args == ("./scripts/version.sh", self.commit):
             return self.result(args, VERSION)
@@ -185,6 +199,11 @@ class FakeCommands:
         if args[:1] == ("./scripts/release-notes.sh",):
             return self.result(args, "## 변경 사항\n\n- 릴리스 검사 자료\n")
         raise AssertionError(f"허용하지 않은 외부 명령: {args!r}")
+
+    def arm_visibility(self, phase):
+        # 쓰기는 성공했지만 후속 조회가 이전 복제본을 읽는 실제 지연을 모사한다.
+        self.last_write = phase
+        self.pending_visibility = list(self.visibility_after_write.get(phase, []))
 
     def publishing_commands(self):
         return [call for call in self.calls if call[:2] in (("git", "tag"), ("git", "push"))
@@ -206,6 +225,7 @@ class PublishTests(unittest.TestCase):
         self.publisher.env.pop("NOTARY_PROFILE", None)
         self.addCleanup(mock.patch.stopall)
         mock.patch.object(RELEASE.subprocess, "run", side_effect=self.fake.run).start()
+        self.sleep = mock.patch("time.sleep").start()
         self.output = io.StringIO()
         redirect = contextlib.redirect_stdout(self.output)
         redirect.__enter__()
@@ -428,6 +448,7 @@ class PublishTests(unittest.TestCase):
         self.assert_stopped(no_mutations=False)
         self.assertTrue(self.fake.release["draft"])
         self.assertFalse(any(call[:3] == ("gh", "release", "edit") for call in self.fake.calls))
+        self.sleep.assert_not_called()
 
     def test_release_published_by_another_process_is_not_edited_again(self):
         self.fake.publish_on_readback = True
@@ -470,12 +491,119 @@ class PublishTests(unittest.TestCase):
         self.assert_stopped(no_mutations=False)
         before = dict(self.fake.remote_files)
         self.assertTrue(self.fake.release["draft"])
+        self.sleep.assert_not_called()
+        self.assertEqual(sum(call[:3] == ("gh", "release", "edit") for call in self.fake.calls), 1)
         self.fake.failures.clear()
         self.fake.calls.clear()
         self.publisher.execute()
         self.assertFalse(any(call[:3] == ("gh", "release", "upload") for call in self.fake.calls))
         self.assertEqual(self.fake.remote_files, before)
         self.assertFalse(self.fake.release["draft"])
+
+    def test_new_draft_becomes_visible_on_fourth_read_without_duplicate_create(self):
+        self.fake.visibility_after_write["create"] = [None, None, None]
+        self.publisher.execute()
+        self.assertEqual(self.fake.visibility_reads.count("create"), 4)
+        self.assertEqual(self.sleep.call_args_list, [mock.call(1)] * 3)
+        self.assertEqual(sum(call[:3] == ("gh", "release", "create") for call in self.fake.calls), 1)
+        self.assertFalse(self.fake.release["draft"])
+
+    def test_uploaded_assets_become_visible_without_duplicate_upload(self):
+        self.fake.visibility_after_write["upload"] = [
+            lambda info: {**info, "assets": []},
+            lambda info: {**info, "assets": info["assets"][:2]},
+            lambda info: {**info, "assets": info["assets"][:3]},
+        ]
+        self.publisher.execute()
+        self.assertEqual(self.sleep.call_args_list, [mock.call(1)] * 3)
+        uploads = [Path(call[4]).name for call in self.fake.calls if call[:3] == ("gh", "release", "upload")]
+        self.assertEqual(uploads, NAMES)
+        # 준비된 응답을 다시 조회하지 않고 바로 원격 바이트 검증에 사용한다.
+        last_upload = max(index for index, call in enumerate(self.fake.calls) if call[:3] == ("gh", "release", "upload"))
+        first_download = next(index for index, call in enumerate(self.fake.calls) if call[:3] == ("gh", "release", "download"))
+        reads = [call for call in self.fake.calls[last_upload + 1:first_download] if call[:2] == ("gh", "api")]
+        self.assertEqual(len(reads), 4)
+        self.assertFalse(self.fake.release["draft"])
+
+    def test_publication_becomes_visible_without_duplicate_edit(self):
+        self.fake.visibility_after_write["edit"] = [lambda info: {**info, "draft": True}] * 3
+        self.publisher.execute()
+        self.assertEqual(self.fake.visibility_reads.count("edit"), 4)
+        self.assertEqual(self.sleep.call_args_list, [mock.call(1)] * 3)
+        self.assertEqual(sum(call[:3] == ("gh", "release", "edit") for call in self.fake.calls), 1)
+        self.assertFalse(self.fake.release["draft"])
+
+    def assert_visibility_timeout_preserves_results(self, phase, response, uploaded_count, published):
+        self.fake.visibility_after_write[phase] = [response] * 5
+        self.assert_stopped(no_mutations=False)
+        self.assertEqual(self.fake.visibility_reads.count(phase), 4)
+        self.assertEqual(len(self.fake.pending_visibility), 1)
+        self.assertEqual(self.sleep.call_args_list, [mock.call(1)] * 3)
+        self.assertEqual(self.fake.local_tag, COMMIT)
+        self.assertEqual(self.fake.remote_tag, COMMIT)
+        self.assertEqual(self.fake.release["draft"], not published)
+        self.assertEqual(len(self.fake.remote_files), uploaded_count)
+        self.assertTrue((self.fake.directory / "release-notes.md").is_file())
+        for name, content in self.fake.remote_files.items():
+            self.assertEqual(content, (self.fake.directory / name).read_bytes())
+        self.assertEqual(sum(call[:3] == ("gh", "release", "create") for call in self.fake.calls), 1)
+        self.assertEqual(sum(call[:3] == ("gh", "release", "upload") for call in self.fake.calls), uploaded_count)
+        self.assertEqual(sum(call[:3] == ("gh", "release", "edit") for call in self.fake.calls), int(published))
+
+    def test_creation_visibility_timeout_keeps_draft_and_prepared_files(self):
+        self.assert_visibility_timeout_preserves_results("create", None, 0, False)
+
+    def test_upload_visibility_timeout_keeps_all_uploaded_bytes(self):
+        self.assert_visibility_timeout_preserves_results("upload", lambda info: {**info, "assets": []}, 4, False)
+
+    def test_publication_visibility_timeout_never_repeats_edit(self):
+        self.assert_visibility_timeout_preserves_results("edit", lambda info: {**info, "draft": True}, 4, True)
+
+    def test_postwrite_lookup_errors_stop_without_waiting_or_repeating_writes(self):
+        self.fake.visibility_after_write["create"] = ["gh: Not Found (HTTP 404)", None]
+        self.assert_stopped(no_mutations=False)
+        self.assertEqual(self.fake.visibility_reads.count("create"), 1)
+        self.sleep.assert_not_called()
+        self.assertEqual(sum(call[:3] == ("gh", "release", "create") for call in self.fake.calls), 1)
+        self.assertEqual(self.fake.remote_files, {})
+        self.assertTrue(self.fake.release["draft"])
+
+    def test_postwrite_identity_prerelease_and_foreign_assets_fail_immediately(self):
+        responses = {
+            "다른 ID": lambda info: {**info, "id": 456},
+            "사전 릴리스": lambda info: {**info, "prerelease": True},
+            "예상 밖 파일": lambda info: {**info, "assets": [{"name": "foreign.zip", "state": "uploaded"}]},
+            "중복 파일": lambda info: {**info, "assets": [info["assets"][0]] * 2},
+        }
+        for reason, response in responses.items():
+            with self.subTest(reason=reason):
+                # 같은 임시 경로를 쓰되 각 독립 실행의 서버·명령 기록은 초기화한다.
+                self.fake.__init__(self.root)
+                self.sleep.reset_mock()
+                self.fake.visibility_after_write["upload"] = [response, None]
+                self.assert_stopped(no_mutations=False)
+                self.assertEqual(self.fake.visibility_reads.count("upload"), 1)
+                self.sleep.assert_not_called()
+                self.assertFalse(any(call[:3] == ("gh", "release", "edit") for call in self.fake.calls))
+                self.assertEqual(set(self.fake.remote_files), set(NAMES))
+
+    def test_resume_without_own_write_does_not_wait_for_missing_assets(self):
+        self.fake.existing_release()
+        self.fake.pending_visibility = [
+            lambda info: info,
+            lambda info: info,
+            lambda info: {**info, "assets": info["assets"][:2]},
+        ]
+        self.assert_stopped(no_mutations=False)
+        self.sleep.assert_not_called()
+        self.assertEqual(self.fake.github_mutations(), [])
+
+    def test_release_replaced_before_resuming_upload_is_untouched(self):
+        self.fake.existing_release(names=[])
+        self.fake.pending_visibility = [lambda info: info, lambda info: {**info, "id": 456}]
+        self.assert_stopped(no_mutations=False)
+        self.assertEqual(self.fake.github_mutations(), [])
+        self.sleep.assert_not_called()
 
 
 if __name__ == "__main__":

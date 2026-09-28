@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 REPOSITORY = "jeonghyeon-net/menubar-dock"
 ROOT = Path(__file__).resolve().parent.parent
@@ -90,6 +91,30 @@ class Publisher:
         if remote and remote != commit:
             raise ReleaseError(f"원격 {tag} 태그가 다른 커밋을 가리킵니다.")
 
+    def wait_after_write(self, tag, phase, names, release_id=None):
+        """성공한 쓰기의 반영만 최대 4회 읽는다. 쓰기나 조회 오류는 재시도하지 않는다."""
+        expected = set(names)
+        for attempt in range(4):
+            info = self.release_info(tag)
+            if info:
+                if release_id is not None and info["id"] != release_id:
+                    raise ReleaseError("상태 확인 중 릴리스 ID가 변경됐습니다. 기존 릴리스를 수정하지 않습니다.")
+                if info.get("prerelease"):
+                    raise ReleaseError("상태 확인 중 사전 릴리스가 발견됐습니다. 게시를 중단합니다.")
+                if phase != "published" and not info["draft"]:
+                    raise ReleaseError("다른 작업이 릴리스를 게시했습니다. 기존 릴리스를 수정하지 않습니다.")
+                assets = info.get("assets", [])
+                actual = {asset["name"] for asset in assets}
+                if len(actual) != len(assets) or actual - expected:
+                    raise ReleaseError("예상하지 못한 첨부 파일이 있습니다. 기존 파일을 보존하고 중단합니다.")
+                complete = actual == expected and all(asset.get("state") == "uploaded" for asset in assets)
+                if phase == "created" or (complete and info["draft"] == (phase == "uploaded")):
+                    return info
+            if attempt < 3:
+                time.sleep(1)
+        raise ReleaseError("GitHub의 상태 반영을 4회 확인했으나 완료되지 않았습니다. "
+                           "태그와 첨부 파일은 보존했습니다. 같은 명령으로 다시 확인하세요.")
+
     def manifest(self, directory, version, commit):
         self.run("python3", "scripts/package_metadata.py", "verify", str(directory))
         data = json.loads((directory / "release-manifest.json").read_text())
@@ -97,8 +122,9 @@ class Publisher:
             raise ReleaseError("패키지의 버전·대상 커밋이 이번 릴리스와 다릅니다.")
         return data
 
-    def verify_remote(self, tag, version, commit, local=None):
-        info = self.release_info(tag)
+    def verify_remote(self, tag, version, commit, local=None, info=None):
+        if info is None:
+            info = self.release_info(tag)
         if not info or info.get("prerelease"):
             raise ReleaseError("정식 릴리스 정보를 확인할 수 없습니다.")
         expected = {f"MenuBarDock-{version}-arm64.zip", f"MenuBarDock-{version}-arm64.dmg",
@@ -122,6 +148,7 @@ class Publisher:
         assets = {asset["name"]: asset for asset in info.get("assets", [])}
         if len(assets) != len(info.get("assets", [])) or set(assets) - set(names):
             raise ReleaseError("초안에 예상하지 못한 첨부 파일이 있습니다. 기존 파일을 보존하고 중단합니다.")
+        uploaded = False
         for name in names:
             if name in assets:
                 # 재시도는 이미 올라간 바이트가 같을 때만 이어간다. --clobber는 사용하지 않는다.
@@ -132,6 +159,8 @@ class Publisher:
                         raise ReleaseError(f"초안의 기존 첨부 파일과 로컬 파일이 다릅니다: {name}")
             else:
                 self.step("gh", "release", "upload", tag, str(directory / name), "--repo", REPOSITORY)
+                uploaded = True
+        return uploaded
 
     def execute(self, dry_run=False, prepare=False):
         commit, refs = self.preflight()
@@ -195,16 +224,19 @@ class Publisher:
             self.step("git", "tag", "-a", tag, commit, "-m", f"Menu Bar Dock {version}")
         self.step("git", "push", "origin", f"refs/tags/{tag}")
         # 첨부 파일을 모두 검증한 뒤 초안을 공개하므로 불완전한 릴리스가 최신 버전이 되지 않는다.
+        names = [a["name"] for a in metadata["artifacts"]] + ["SHA256SUMS", "release-manifest.json"]
         if not info:
             self.step("gh", "release", "create", tag, "--repo", REPOSITORY, "--verify-tag",
                       "--target", commit, "--title", tag, "--notes-file", str(notes_path), "--draft")
-        current = self.release_info(tag)
-        if not current or not current["draft"]:
+            current = self.wait_after_write(tag, "created", names)
+        else:
+            current = self.release_info(tag)
+        if not current or not current["draft"] or (info and current["id"] != info["id"]):
             raise ReleaseError("게시 도중 릴리스 상태가 변경됐습니다. 첨부 파일을 수정하지 않습니다.")
-        names = [a["name"] for a in metadata["artifacts"]] + ["SHA256SUMS", "release-manifest.json"]
-        self.upload_missing(current, tag, directory, names)
-        verified = self.verify_remote(tag, version, commit, directory)
-        if not verified["draft"]:
+        uploaded = self.upload_missing(current, tag, directory, names)
+        ready = self.wait_after_write(tag, "uploaded", names, current["id"]) if uploaded else None
+        verified = self.verify_remote(tag, version, commit, directory, info=ready)
+        if not verified["draft"] or verified["id"] != current["id"]:
             raise ReleaseError("첨부 파일 검증 중 다른 작업이 릴리스를 게시했습니다. 기존 릴리스를 수정하지 않습니다.")
         _, refs = self.preflight(commit)
         self.validate_tag(tag, commit, refs)
@@ -213,9 +245,7 @@ class Publisher:
             raise ReleaseError("공개 직전에 릴리스 상태가 변경됐습니다. 기존 릴리스를 수정하지 않습니다.")
         self.step("gh", "release", "edit", tag, "--repo", REPOSITORY, "--verify-tag", "--title", tag,
                   "--notes-file", str(notes_path), "--draft=false", "--latest")
-        published = self.release_info(tag)
-        if not published or published["draft"] or published.get("prerelease"):
-            raise ReleaseError("릴리스 공개 상태를 확인하지 못했습니다. 같은 명령으로 다시 확인하세요.")
+        published = self.wait_after_write(tag, "published", names, verified["id"])
         print(f"게시 완료: {published['html_url']}")
 
 
