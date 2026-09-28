@@ -1,0 +1,22 @@
+name: 버그 보고
+description: 예상과 다르게 동작한 내용을 알려주세요.
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 재현 방법
+      description: 수행한 동작과 실제 결과, 예상한 결과를 적어주세요.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 환경
+      placeholder: 앱 버전 / macOS 버전 / Mac 모델 / 디스플레이 개수
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: 추가 정보
+      description: 화면 색상 문제는 활성·비활성 화면을 함께 올려주시면 도움이 됩니다. 개인정보는 가려주세요.

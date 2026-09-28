@@ -9,21 +9,21 @@ let package = Package(
         .executable(name: "MenuBarDock", targets: ["MenuBarDock"]),
         .library(name: "DockDomain", targets: ["DockDomain"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", exact: "3.1.0"),
-    ],
+    dependencies: [],
     targets: [
         .target(name: "DockDomain"),
         .target(name: "DockPersistence", dependencies: ["DockDomain"]),
         .target(name: "DockPlatform", dependencies: ["DockDomain"]),
+        .target(name: "DockShortcuts"),
         .executableTarget(
             name: "MenuBarDock",
-            dependencies: ["DockDomain", "DockPersistence", "DockPlatform", "KeyboardShortcuts"]
+            dependencies: ["DockDomain", "DockPersistence", "DockPlatform", "DockShortcuts"]
         ),
         .testTarget(name: "DockDomainTests", dependencies: ["DockDomain"]),
         .testTarget(name: "DockPersistenceTests", dependencies: ["DockPersistence", "DockDomain"]),
         .testTarget(name: "DockPlatformTests", dependencies: ["DockPlatform", "DockDomain"]),
+        .testTarget(name: "DockShortcutsTests", dependencies: ["DockShortcuts"]),
+        .testTarget(name: "MenuBarDockTests", dependencies: ["MenuBarDock"]),
     ],
     swiftLanguageModes: [.v6]
 )
-

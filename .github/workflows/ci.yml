@@ -1,0 +1,35 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: 도구 체인 확인
+        run: swift --version
+      - name: 경고 없는 빌드
+        run: swift build -Xswiftc -warnings-as-errors
+      - name: 도메인·저장소·플랫폼 테스트
+        run: ./scripts/test.sh --enable-code-coverage
+      - name: 앱 번들 및 배포 패키지
+        run: ./scripts/package.sh
+      - name: 번들 내부 진단
+        run: '"build/Menu Bar Dock.app/Contents/MacOS/MenuBarDock" --self-test'
+      - name: 실제 앱 시작·저장·종료
+        run: ./scripts/smoke-test.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MenuBarDock-arm64
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/SHA256SUMS
+          retention-days: 14
