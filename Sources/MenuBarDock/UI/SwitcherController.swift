@@ -77,7 +77,7 @@ final class SwitcherController: NSObject, NSWindowDelegate {
 
     private func makePanel() -> SwitcherPanel {
         let panel = SwitcherPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 228),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 116),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false
         )
         panel.title = "앱 선택"
@@ -96,9 +96,9 @@ final class SwitcherController: NSObject, NSWindowDelegate {
         guard let panel, let session else { return }
         let itemMap = Dictionary(uniqueKeysWithValues: model.items.map { ($0.id, $0) })
         let items = session.ids.compactMap { itemMap[$0] }
-        let width = min(max(360, CGFloat(items.count) * 88 + 40), min(capturedScreenFrame?.width ?? 760, 760) - 32)
-        panel.setContentSize(NSSize(width: width, height: 228))
-        let content = SwitcherContentView(frame: NSRect(x: 0, y: 0, width: width, height: 228))
+        let width = min(max(220, CGFloat(items.count) * 64 + 32), min(capturedScreenFrame?.width ?? 760, 760) - 32)
+        panel.setContentSize(NSSize(width: width, height: 116))
+        let content = SwitcherContentView(frame: NSRect(x: 0, y: 0, width: width, height: 116))
         content.handleKey = { [weak self] event in self?.handleKey(event) }
         content.material = .popover
         content.blendingMode = .behindWindow
@@ -106,76 +106,84 @@ final class SwitcherController: NSObject, NSWindowDelegate {
         content.wantsLayer = true
         content.layer?.cornerRadius = 18
         content.layer?.masksToBounds = true
+        // layer의 모서리만 자르면 behindWindow 재질은 사각형으로 남는다.
+        // AppKit의 material/shadow 마스크에도 같은 윤곽을 전달한다.
+        content.maskImage = Self.roundedMaterialMask(size: content.bounds.size, radius: 18)
         content.setAccessibilityLabel("앱 선택. 방향키로 이동하고 Enter로 열기, Escape로 취소")
         panel.contentView = content
 
         let selectedName = items.first(where: { $0.id == session.selectedID })?.app.name
         let title = NSTextField(labelWithString: selectedName ?? "표시할 앱이 없습니다")
-        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        title.font = .systemFont(ofSize: 12, weight: .medium)
         title.alignment = .center
-        title.frame = NSRect(x: 20, y: 181, width: width - 40, height: 26)
+        title.frame = NSRect(x: 40, y: 10, width: width - 80, height: 18)
         title.lineBreakMode = .byTruncatingTail
         content.addSubview(title)
 
         selectedButtons.removeAll()
         if items.isEmpty {
-            let empty = NSTextField(wrappingLabelWithString: "설정에서 앱을 추가하거나 실행 중인 앱 표시를 켜세요.")
-            empty.alignment = .center
-            empty.textColor = .secondaryLabelColor
-            empty.frame = NSRect(x: 30, y: 95, width: width - 60, height: 48)
-            content.addSubview(empty)
+            let add = NSButton(title: "앱 추가…", target: self, action: #selector(addApps))
+            add.bezelStyle = .rounded
+            add.frame = NSRect(x: (width - 100) / 2, y: 45, width: 100, height: 28)
+            content.addSubview(add)
         } else {
-            let scroll = NSScrollView(frame: NSRect(x: 16, y: 58, width: width - 32, height: 112))
+            let scroll = NSScrollView(frame: NSRect(x: 16, y: 34, width: width - 32, height: 68))
             scroll.drawsBackground = false
             scroll.hasHorizontalScroller = true
             scroll.autohidesScrollers = true
             scroll.borderType = .noBorder
-            let document = NSView(frame: NSRect(x: 0, y: 0, width: max(scroll.bounds.width, CGFloat(items.count) * 88), height: 96))
-            let horizontalInset = max(0, (document.bounds.width - CGFloat(items.count) * 88) / 2)
+            let document = NSView(frame: NSRect(x: 0, y: 0, width: max(scroll.bounds.width, CGFloat(items.count) * 64), height: 64))
+            let horizontalInset = max(0, (document.bounds.width - CGFloat(items.count) * 64) / 2)
             var selectedRect: NSRect?
             for (index, item) in items.enumerated() {
-                let tileRect = NSRect(x: horizontalInset + CGFloat(index) * 88, y: 0, width: 84, height: 96)
+                let tileRect = NSRect(x: horizontalInset + CGFloat(index) * 64, y: 0, width: 60, height: 64)
                 let tile = NSView(frame: tileRect)
                 tile.wantsLayer = true
                 tile.layer?.cornerRadius = 12
                 if item.id == session.selectedID {
-                    tile.layer?.backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.20).cgColor
-                    tile.layer?.borderColor = NSColor.keyboardFocusIndicatorColor.cgColor
-                    tile.layer?.borderWidth = 2
+                    tile.layer?.backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.18).cgColor
                     selectedRect = tileRect
                 }
                 let button = NSButton(image: model.imageForApp(item.app), target: self, action: #selector(clickApp(_:)))
                 button.identifier = NSUserInterfaceItemIdentifier(item.id.rawValue)
                 button.isBordered = false
                 button.imageScaling = .scaleProportionallyUpOrDown
-                button.frame = NSRect(x: 14, y: 27, width: 56, height: 56)
+                // 타일 전체가 클릭 영역이다. 아이콘 밖의 여백도 같은 앱을 선택한다.
+                button.frame = tile.bounds
+                button.image = model.imageForApp(item.app).copy() as? NSImage
+                button.image?.size = NSSize(width: 44, height: 44)
+                button.imageScaling = .scaleNone
                 button.setAccessibilityLabel("\(item.app.name) 열기")
                 button.setAccessibilityValue(item.id == session.selectedID ? "선택됨" : "")
                 button.toolTip = item.app.name
                 selectedButtons[item.id] = button
                 tile.addSubview(button)
-                let label = NSTextField(labelWithString: item.app.name)
-                label.font = .systemFont(ofSize: 11)
-                label.alignment = .center
-                label.lineBreakMode = .byTruncatingTail
-                label.frame = NSRect(x: 4, y: 6, width: 76, height: 16)
-                tile.addSubview(label)
                 document.addSubview(tile)
             }
             scroll.documentView = document
             content.addSubview(scroll)
             if let selectedRect { document.scrollToVisible(selectedRect) }
         }
-        let footer = NSTextField(labelWithString: "← → 이동    ↵ 열기    esc 취소")
-        footer.font = .systemFont(ofSize: 11)
-        footer.textColor = .secondaryLabelColor
-        footer.frame = NSRect(x: 22, y: 20, width: width - 102, height: 18)
-        content.addSubview(footer)
-        let settings = NSButton(title: "설정…", target: self, action: #selector(openSettings))
-        settings.bezelStyle = .rounded
-        settings.frame = NSRect(x: width - 83, y: 14, width: 68, height: 28)
+        // 메뉴 막대에는 앱 아이콘만 둔다. 관리는 선택 패널의 작은 설정 버튼으로 연다.
+        let settings = NSButton(image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "설정") ?? NSImage(),
+                                target: self, action: #selector(openSettings))
+        settings.isBordered = false
+        settings.contentTintColor = .secondaryLabelColor
+        settings.toolTip = "설정"
+        settings.setAccessibilityLabel("설정")
+        settings.frame = NSRect(x: width - 34, y: 8, width: 22, height: 22)
         content.addSubview(settings)
+        panel.invalidateShadow()
         if panel.isKeyWindow { panel.makeFirstResponder(content) }
+    }
+
+    /// NSVisualEffectView.maskImage는 재질과 윈도우 그림자에 함께 적용된다.
+    static func roundedMaterialMask(size: NSSize, radius: CGFloat) -> NSImage {
+        NSImage(size: size, flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
     }
 
     private func handleKey(_ event: NSEvent) {
@@ -209,6 +217,7 @@ final class SwitcherController: NSObject, NSWindowDelegate {
         model.perform(.open(id))
     }
 
+    @objc private func addApps() { close(); model.perform(.addApps) }
     @objc private func openSettings() { close(); model.perform(.settings) }
 }
 

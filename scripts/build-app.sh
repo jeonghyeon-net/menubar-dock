@@ -6,9 +6,19 @@ cd "$task_root"
 task_config="${CONFIGURATION:-release}"
 task_arch="${BUILD_ARCH:-arm64}"
 task_out="$task_root/build"
-task_app="$task_out/Menu Bar Dock.app"
+task_destination="$task_out/Menu Bar Dock.app"
+# 실행 중인 Mach-O를 덮어쓰면 지연 로드 시 서명 검증이 실패할 수 있다.
+# 새 번들을 완성한 뒤 교체하며, 현재 앱이 실행 중이면 기존 번들을 보존한다.
+if /bin/ps -ww -axo comm= | /usr/bin/grep -Fx "$task_destination/Contents/MacOS/MenuBarDock" >/dev/null; then
+    printf 'Menu Bar Dock을 종료한 뒤 다시 빌드해 주세요. 실행 중인 앱은 덮어쓰지 않습니다.\n' >&2
+    exit 1
+fi
 swift build -c "$task_config" --arch "$task_arch"
 task_bin="$(swift build -c "$task_config" --arch "$task_arch" --show-bin-path)"
+mkdir -p "$task_out"
+task_stage="$(mktemp -d "$task_out/.app-build.XXXXXX")"
+trap 'rm -rf "$task_stage"' EXIT
+task_app="$task_stage/Menu Bar Dock.app"
 mkdir -p "$task_app/Contents/MacOS" "$task_app/Contents/Resources"
 cp "$task_bin/MenuBarDock" "$task_app/Contents/MacOS/MenuBarDock"
 cp Config/Info.plist "$task_app/Contents/Info.plist"
@@ -30,4 +40,9 @@ else
 fi
 codesign --verify --strict "$task_app"
 lipo "$task_app/Contents/MacOS/MenuBarDock" -verify_arch "$task_arch"
-printf '\n앱 생성 완료: %s\n' "$task_app"
+if [ -e "$task_destination" ]; then mv "$task_destination" "$task_stage/previous.app"; fi
+if ! mv "$task_app" "$task_destination"; then
+    if [ -d "$task_stage/previous.app" ]; then mv "$task_stage/previous.app" "$task_destination"; fi
+    exit 1
+fi
+printf '\n앱 생성 완료: %s\n' "$task_destination"

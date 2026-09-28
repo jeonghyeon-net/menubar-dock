@@ -7,6 +7,76 @@ import DockDomain
 @Suite(.serialized)
 @MainActor
 struct NativeUIBehaviorTests {
+    @Test func eachAppOwnsAnIndependentSystemStatusItemAndLeftClickAction() throws {
+        let fixture = UIInputFixture()
+        var items: [NSStatusItem] = []
+        let controller = StatusItemController(model: fixture.model, makeStatusItem: { length in
+            let item = NSStatusBar.system.statusItem(withLength: length)
+            items.append(item)
+            return item
+        })
+        defer { controller.tearDown(); fixture.close() }
+        #expect(items.count == fixture.entries.count)
+        #expect(Set(items.map(ObjectIdentifier.init)).count == fixture.entries.count)
+        for entry in fixture.entries {
+            let item = try #require(items.first { $0.button?.accessibilityLabel() == entry.name })
+            let button = try #require(item.button)
+            #expect(button.image != nil)
+            #expect(button.subviews.isEmpty)
+            #expect(item.menu == nil)
+            let point = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: button.superview)
+            #expect(button.hitTest(point) === button)
+            try dispatchControlAction(button)
+        }
+        #expect(fixture.openedIDs == fixture.entries.map(\.id))
+    }
+
+    @Test func reorderingReassignsAppsWithoutRecreatingSystemSlots() throws {
+        let fixture = UIInputFixture()
+        var items: [NSStatusItem] = []
+        let controller = StatusItemController(model: fixture.model, makeStatusItem: { length in
+            let item = NSStatusBar.system.statusItem(withLength: length)
+            items.append(item)
+            return item
+        })
+        defer { controller.tearDown(); fixture.close() }
+        let firstSlotButton = try #require(items.first { $0.button?.accessibilityLabel() == fixture.entries[0].name }?.button)
+        fixture.model.items.reverse()
+        controller.update()
+        #expect(items.count == fixture.entries.count)
+        #expect(firstSlotButton.accessibilityLabel() == fixture.entries[2].name)
+        try dispatchControlAction(firstSlotButton)
+        #expect(fixture.openedIDs == [fixture.entries[2].id])
+    }
+
+    @Test func hiddenAppsDoNotLeaveBlankOrManagementStatusItems() {
+        let fixture = UIInputFixture()
+        var active: [NSStatusItem] = []
+        let controller = StatusItemController(model: fixture.model, makeStatusItem: { length in
+            let item = NSStatusBar.system.statusItem(withLength: length)
+            active.append(item)
+            return item
+        }, removeStatusItem: { item in
+            active.removeAll { $0 === item }
+            NSStatusBar.system.removeStatusItem(item)
+        })
+        defer { controller.tearDown(); fixture.close() }
+        #expect(active.count == 3)
+        #expect(active.allSatisfy { item in fixture.entries.contains { $0.name == item.button?.accessibilityLabel() } })
+        fixture.model.preferences.maxVisibleApps = 1
+        controller.update()
+        #expect(active.count == 1)
+        #expect(active.allSatisfy { $0.length > 0 })
+        fixture.model.items = []
+        controller.update()
+        #expect(active.isEmpty)
+        fixture.model.items = fixture.entries.map { DockItem(app: $0, isRunning: false) }
+        controller.update()
+        #expect(active.count == 1)
+        controller.tearDown()
+        #expect(active.isEmpty)
+    }
+
     @Test func unchangedAppearanceNotificationsDoNotCauseAnIdleRenderLoop() async {
         let fixture = UIInputFixture()
         let status = StatusItemController(model: fixture.model)
@@ -22,7 +92,7 @@ struct NativeUIBehaviorTests {
         await Task.yield()
         await Task.yield()
         #expect(status.renderCount == initial)
-        fixture.model.preferences.iconSpacing += 1
+        fixture.model.preferences.slotWidth += 1
         status.update()
         #expect(status.renderCount == initial + 1)
     }
@@ -96,17 +166,31 @@ struct NativeUIBehaviorTests {
         let table = try #require(descendants(of: content).compactMap { $0 as? NSTableView }.first)
         #expect(table.numberOfRows == 3)
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        let down = try #require(descendants(of: content).compactMap { $0 as? NSButton }.first { $0.title == "↓ 아래로" })
+        let down = try #require(descendants(of: content).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "아래로 이동" })
         try dispatchControlAction(down)
         #expect(fixture.actions.contains { action in
             if case let .move(source, target) = action { return source == IndexSet(integer: 0) && target == 2 }
             return false
         })
-        let pin = try #require(table.view(atColumn: 1, row: 0, makeIfNecessary: true) as? NSButton)
+        let pinCell = try #require(table.view(atColumn: 1, row: 0, makeIfNecessary: true))
+        let pin = try #require(descendants(of: pinCell).compactMap { $0 as? NSButton }.first {
+            $0.accessibilityLabel() == "\(fixture.entries[0].name) 고정"
+        })
         pin.setNextState()
         try dispatchControlAction(pin)
         #expect(fixture.actions.contains { action in
             if case let .pin(id, value) = action { return id == fixture.entries[0].id && !value }
+            return false
+        })
+        let visibilityCell = try #require(table.view(atColumn: 2, row: 0, makeIfNecessary: true))
+        let visibility = try #require(descendants(of: visibilityCell).compactMap { $0 as? NSButton }.first {
+            $0.accessibilityLabel() == "\(fixture.entries[0].name) 표시"
+        })
+        #expect(visibility.state == .on)
+        visibility.setNextState()
+        try dispatchControlAction(visibility)
+        #expect(fixture.actions.contains { action in
+            if case let .exclude(id, value) = action { return id == fixture.entries[0].id && value }
             return false
         })
     }

@@ -4,10 +4,12 @@ import DockDomain
 import DockShortcuts
 
 @MainActor
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSTabViewDelegate {
     private let model: DockPresentationModel
     private let noticeView = NSStackView()
     private let noticeLabel = NSTextField(wrappingLabelWithString: "")
+    private let tabs = NSTabView()
+    private var preferredContentHeight: CGFloat?
     private var subscription: AnyCancellable?
     private let applications: ApplicationsSettingsPage
     private let appearance: AppearanceSettingsPage
@@ -19,12 +21,12 @@ final class SettingsWindowController: NSWindowController {
         appearance = AppearanceSettingsPage(model: model)
         shortcuts = ShortcutSettingsPage(model: model)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 710, height: 610),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 360),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
         )
-        window.title = "Menu Bar Dock 설정"
-        window.minSize = NSSize(width: 620, height: 530)
-        window.setFrameAutosaveName("MenuBarDock.Settings")
+        window.title = "Menu Bar Dock"
+        window.contentMinSize = NSSize(width: 520, height: 360)
+        window.setFrameAutosaveName("MenuBarDock.Settings.Compact")
         window.isReleasedWhenClosed = false
         super.init(window: window)
         buildContent()
@@ -40,6 +42,7 @@ final class SettingsWindowController: NSWindowController {
     func show() {
         NSApp.activate()
         showWindow(nil)
+        resizeToSelectedPane(force: true)
         window?.makeKeyAndOrderFront(nil)
     }
 
@@ -47,31 +50,31 @@ final class SettingsWindowController: NSWindowController {
         let container = NSStackView()
         container.orientation = .vertical
         container.alignment = .leading
-        container.spacing = 12
-        container.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        container.spacing = 8
+        container.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         window?.contentView = container
 
         noticeView.orientation = .horizontal
         noticeView.alignment = .top
-        noticeView.spacing = 10
+        noticeView.spacing = 8
         let warning = NSImageView(image: NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "안내") ?? NSImage())
         warning.contentTintColor = .systemOrange
         warning.setContentHuggingPriority(.required, for: .horizontal)
         noticeLabel.font = .systemFont(ofSize: 12)
         noticeLabel.isSelectable = true
-        let dismiss = ActionButton(title: "닫기") { [weak model] in model?.perform(.dismissNotice) }
+        noticeLabel.maximumNumberOfLines = 3
+        let dismiss = toolbarButton("×", label: "알림 닫기") { [weak model] in model?.perform(.dismissNotice) }
         noticeView.addArrangedSubview(warning)
         noticeView.addArrangedSubview(noticeLabel)
         noticeView.addArrangedSubview(dismiss)
         container.addArrangedSubview(noticeView)
 
-        let tabs = NSTabView()
         tabs.tabViewType = .topTabsBezelBorder
         for (name, view) in [
-            ("앱과 순서", applications as NSView),
-            ("메뉴 막대", appearance as NSView),
+            ("앱", applications as NSView),
+            ("표시", appearance as NSView),
             ("단축키", shortcuts as NSView),
-            ("사용 안내", HelpSettingsPage(model: model) as NSView),
+            ("정보", HelpSettingsPage(model: model) as NSView),
         ] {
             let item = NSTabViewItem(identifier: name)
             item.label = name
@@ -82,19 +85,47 @@ final class SettingsWindowController: NSWindowController {
         tabs.translatesAutoresizingMaskIntoConstraints = false
         noticeView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            tabs.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -32),
+            tabs.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -24),
             noticeView.widthAnchor.constraint(equalTo: tabs.widthAnchor),
-            tabs.heightAnchor.constraint(greaterThanOrEqualToConstant: 420),
         ])
         tabs.setContentHuggingPriority(.defaultLow, for: .vertical)
+        tabs.delegate = self
     }
 
     private func refresh() {
         noticeLabel.stringValue = model.notice ?? ""
+        noticeLabel.toolTip = model.notice
         noticeView.isHidden = model.notice == nil
         applications.refresh()
         appearance.refresh()
         shortcuts.refresh()
+        resizeToSelectedPane()
+    }
+
+    func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        resizeToSelectedPane(force: true)
+    }
+
+    private func resizeToSelectedPane(force: Bool = false) {
+        guard let window else { return }
+        let paneHeight: CGFloat
+        switch tabs.selectedTabViewItem?.identifier as? String {
+        case "표시": paneHeight = appearance.hasLoginNotice ? 310 : 290
+        case "단축키": paneHeight = 250
+        case "정보": paneHeight = 230
+        default: paneHeight = 360
+        }
+        // 오류 안내가 나타날 때만 세 줄의 공간을 더해 설정 컨트롤을 가리지 않는다.
+        let height = paneHeight + (model.notice == nil ? 0 : 54)
+        guard force || preferredContentHeight != height else { return }
+        preferredContentHeight = height
+        let previousFrame = window.frame
+        let contentWidth = window.contentRect(forFrameRect: previousFrame).width
+        window.contentMinSize = NSSize(width: 520, height: height)
+        var frame = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: contentWidth, height: height))
+        // 탭을 전환해도 제목 막대와 포인터의 위치는 그대로 유지한다.
+        frame.origin = NSPoint(x: previousFrame.minX, y: previousFrame.maxY - frame.height)
+        window.setFrame(frame, display: true, animate: false)
     }
 }
 
@@ -105,6 +136,7 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
     private let table = NSTableView()
     private let emptyLabel = NSTextField(wrappingLabelWithString: "")
     private let addButton: ActionButton
+    private let removeButton: ActionButton
     private let upButton: ActionButton
     private let downButton: ActionButton
     private let moreButton = NSPopUpButton(frame: .zero, pullsDown: true)
@@ -113,10 +145,12 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
 
     init(model: DockPresentationModel) {
         self.model = model
-        addButton = ActionButton(title: "앱 추가…") { [weak model] in model?.perform(.addApps) }
-        upButton = ActionButton(title: "↑ 위로", action: nil)
-        downButton = ActionButton(title: "↓ 아래로", action: nil)
+        addButton = toolbarButton("+", label: "앱 추가") { [weak model] in model?.perform(.addApps) }
+        removeButton = toolbarButton("−", label: "목록에서 제거", action: nil)
+        upButton = toolbarButton("↑", label: "위로 이동", action: nil)
+        downButton = toolbarButton("↓", label: "아래로 이동", action: nil)
         super.init(frame: .zero)
+        removeButton.onAction = { [weak self] in self?.removeSelected() }
         upButton.onAction = { [weak self] in self?.moveSelection(-1) }
         downButton.onAction = { [weak self] in self?.moveSelection(1) }
         buildContent()
@@ -129,18 +163,11 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 12
+        content.spacing = 8
         install(content, in: self)
-        let header = horizontal([
-            label("앱을 원하는 순서로", font: .systemFont(ofSize: 16, weight: .semibold)),
-            NSView(), addButton,
-        ])
-        addFullWidth(header, to: content)
-        addFullWidth(label("목록을 드래그하거나 위로·아래로 버튼으로 순서를 바꾸세요.", secondary: true), to: content)
-        table.headerView = nil
-        table.usesAlternatingRowBackgroundColors = true
-        table.rowHeight = 49
-        table.intercellSpacing = NSSize(width: 8, height: 2)
+        table.usesAlternatingRowBackgroundColors = false
+        table.rowHeight = 34
+        table.intercellSpacing = NSSize(width: 8, height: 0)
         table.allowsMultipleSelection = false
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         table.dataSource = self
@@ -148,39 +175,47 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
         table.target = self
         table.doubleAction = #selector(openSelected)
         table.setAccessibilityLabel("앱 표시 순서")
+        table.toolTip = "드래그하거나 화살표 버튼으로 순서를 바꾸세요. 두 번 클릭하면 앱을 엽니다."
         let appColumn = NSTableColumn(identifier: .init("app"))
-        appColumn.width = 410
-        appColumn.minWidth = 240
+        appColumn.title = "앱"
+        appColumn.width = 330
+        appColumn.minWidth = 220
         appColumn.resizingMask = .autoresizingMask
         let pinColumn = NSTableColumn(identifier: .init("pin"))
-        pinColumn.width = 62
-        pinColumn.minWidth = 62
-        pinColumn.maxWidth = 62
-        let excludeColumn = NSTableColumn(identifier: .init("exclude"))
-        excludeColumn.width = 62
-        excludeColumn.minWidth = 62
-        excludeColumn.maxWidth = 62
+        pinColumn.title = "고정"
+        pinColumn.headerCell.alignment = .center
+        pinColumn.width = 42
+        pinColumn.minWidth = 42
+        pinColumn.maxWidth = 42
+        let visibilityColumn = NSTableColumn(identifier: .init("visibility"))
+        visibilityColumn.title = "표시"
+        visibilityColumn.headerCell.alignment = .center
+        visibilityColumn.width = 42
+        visibilityColumn.minWidth = 42
+        visibilityColumn.maxWidth = 42
         table.addTableColumn(appColumn)
         table.addTableColumn(pinColumn)
-        table.addTableColumn(excludeColumn)
+        table.addTableColumn(visibilityColumn)
         table.registerForDraggedTypes([Self.dragType])
         table.setDraggingSourceOperationMask(.move, forLocal: true)
         let scroll = NSScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
-        scroll.borderType = .bezelBorder
+        scroll.borderType = .lineBorder
         addFullWidth(scroll, to: content)
-        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 230).isActive = true
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
+        scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
         emptyLabel.font = .systemFont(ofSize: 12)
         emptyLabel.textColor = .secondaryLabelColor
         addFullWidth(emptyLabel, to: content)
-        moreButton.addItem(withTitle: "더 보기")
+        moreButton.controlSize = .small
+        moreButton.addItem(withTitle: "···")
+        moreButton.setAccessibilityLabel("선택한 앱의 추가 작업")
+        moreButton.toolTip = "선택한 앱의 추가 작업"
         for (title, action, tag) in [
-            ("열기", #selector(openSelected), 0),
             ("Finder에서 보기", #selector(revealSelected), 1),
-            ("앱 경로 다시 지정…", #selector(replaceSelected), 2),
-            ("목록에서 제거", #selector(removeSelected), 3),
+            ("앱 위치 다시 지정…", #selector(replaceSelected), 2),
         ] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
@@ -188,24 +223,28 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
             moreButton.menu?.addItem(item)
         }
         moreButton.menu?.autoenablesItems = false
-        addFullWidth(horizontal([upButton, downButton, NSView(), moreButton]), to: content)
-        addFullWidth(label("고정한 앱은 종료해도 표시됩니다. 제외한 앱은 실행 중이어도 나타나지 않습니다.", secondary: true), to: content)
+        let toolbar = horizontal([addButton, removeButton, NSView(), upButton, downButton, moreButton])
+        toolbar.spacing = 4
+        addFullWidth(toolbar, to: content)
     }
 
     func refresh() {
         let selection = selectedApp?.id
+        let previousRow = table.selectedRow
         if displayedApps != model.apps || displayedReadOnly != model.isReadOnly {
             displayedApps = model.apps
             displayedReadOnly = model.isReadOnly
             table.reloadData()
             if let selection, let row = displayedApps.firstIndex(where: { $0.id == selection }) {
                 table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            } else if previousRow >= 0, !displayedApps.isEmpty {
+                table.selectRowIndexes(IndexSet(integer: min(previousRow, displayedApps.count - 1)), byExtendingSelection: false)
             }
         }
         addButton.isEnabled = !model.isReadOnly
         emptyLabel.stringValue = model.isReadOnly
-            ? "새로운 버전에서 만든 설정 파일을 보호하고 있어 변경할 수 없습니다."
-            : displayedApps.isEmpty ? "아직 앱이 없습니다. 앱을 추가하거나 실행 중인 앱 자동 표시를 켜세요." : ""
+            ? "더 새로운 버전의 설정입니다. 이 버전에서는 읽기만 가능합니다."
+            : displayedApps.isEmpty ? "+ 버튼으로 앱을 추가하세요." : ""
         emptyLabel.isHidden = emptyLabel.stringValue.isEmpty
         updateSelectionControls()
     }
@@ -219,43 +258,45 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
     func tableView(_ tableView: NSTableView, viewFor column: NSTableColumn?, row: Int) -> NSView? {
         guard displayedApps.indices.contains(row), let column else { return nil }
         let app = displayedApps[row]
-        if column.identifier.rawValue == "pin" || column.identifier.rawValue == "exclude" {
+        if column.identifier.rawValue == "pin" || column.identifier.rawValue == "visibility" {
             let isPin = column.identifier.rawValue == "pin"
-            let checkbox = ActionCheckbox(title: isPin ? "고정" : "제외") { [weak model] value in
-                model?.perform(isPin ? .pin(app.id, value) : .exclude(app.id, value))
+            let checkbox = ActionCheckbox(title: "") { [weak model] value in
+                model?.perform(isPin ? .pin(app.id, value) : .exclude(app.id, !value))
             }
-            checkbox.state = (isPin ? app.isPinned : app.isExcluded) ? .on : .off
+            checkbox.state = (isPin ? app.isPinned : !app.isExcluded) ? .on : .off
             checkbox.isEnabled = !model.isReadOnly
-            checkbox.setAccessibilityLabel("\(app.name) \(isPin ? "고정" : "제외")")
-            return checkbox
+            checkbox.controlSize = .small
+            checkbox.setAccessibilityLabel("\(app.name) \(isPin ? "고정" : "표시")")
+            checkbox.toolTip = isPin ? "종료한 뒤에도 메뉴 막대에 유지" : "메뉴 막대와 앱 선택 패널에 표시"
+            let cell = NSView()
+            checkbox.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(checkbox)
+            NSLayoutConstraint.activate([
+                checkbox.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
+                checkbox.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+            return cell
         }
         let cell = NSView()
         let image = NSImageView(image: model.imageForApp(app))
         image.imageScaling = .scaleProportionallyUpOrDown
         image.translatesAutoresizingMaskIntoConstraints = false
         image.setAccessibilityElement(false)
-        let name = label(app.name, font: .systemFont(ofSize: 13, weight: .medium))
+        let name = label(app.name, font: .systemFont(ofSize: 13))
         name.lineBreakMode = .byTruncatingTail
-        let path = label(app.bundlePath, font: .systemFont(ofSize: 10), secondary: true)
-        path.lineBreakMode = .byTruncatingMiddle
-        path.maximumNumberOfLines = 1
-        path.toolTip = app.bundlePath
-        let text = NSStackView(views: [name, path])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 3
-        text.translatesAutoresizingMaskIntoConstraints = false
+        name.maximumNumberOfLines = 1
+        name.translatesAutoresizingMaskIntoConstraints = false
+        cell.toolTip = app.bundlePath
+        name.toolTip = app.bundlePath
         cell.addSubview(image)
-        cell.addSubview(text)
+        cell.addSubview(name)
         NSLayoutConstraint.activate([
             image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 5),
             image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            image.widthAnchor.constraint(equalToConstant: 28), image.heightAnchor.constraint(equalToConstant: 28),
-            text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 10),
-            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-            text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            name.widthAnchor.constraint(lessThanOrEqualTo: text.widthAnchor),
-            path.widthAnchor.constraint(lessThanOrEqualTo: text.widthAnchor),
+            image.widthAnchor.constraint(equalToConstant: 20), image.heightAnchor.constraint(equalToConstant: 20),
+            name.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 8),
+            name.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+            name.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
     }
@@ -284,6 +325,7 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
 
     private func updateSelectionControls() {
         let selected = selectedApp != nil
+        removeButton.isEnabled = selected && !model.isReadOnly
         upButton.isEnabled = selected && table.selectedRow > 0 && !model.isReadOnly
         downButton.isEnabled = selected && table.selectedRow < displayedApps.count - 1 && !model.isReadOnly
         moreButton.isEnabled = selected
@@ -305,75 +347,80 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
 @MainActor
 private final class AppearanceSettingsPage: NSView {
     private let model: DockPresentationModel
-    private let compact = ActionCheckbox(title: "아이콘 하나만 표시", action: nil)
     private let running = ActionCheckbox(title: "실행 중인 앱 자동 표시", action: nil)
     private let login = ActionCheckbox(title: "로그인할 때 시작", action: nil)
-    private let iconSlider = NSSlider(value: 18, minValue: 14, maxValue: 24, target: nil, action: nil)
-    private let spacingSlider = NSSlider(value: 4, minValue: 0, maxValue: 12, target: nil, action: nil)
+    private let iconSlider = NSSlider(value: 40, minValue: 20, maxValue: 64, target: nil, action: nil)
+    private let slotSlider = NSSlider(value: 30, minValue: 20, maxValue: 60, target: nil, action: nil)
     private let count = NSPopUpButton()
     private let iconLabel = label("")
-    private let spacingLabel = label("")
+    private let slotLabel = label("")
     private let loginLabel = label("", secondary: true)
 
     init(model: DockPresentationModel) {
         self.model = model
         super.init(frame: .zero)
-        compact.onChange = { [weak self] value in self?.update(\.isCompact, value) }
         running.onChange = { [weak self] value in self?.update(\.showsRunningApps, value) }
         login.onChange = { [weak model] value in model?.perform(.login(value)) }
+        running.toolTip = "고정하지 않은 앱도 실행 중일 때 메뉴 막대에 표시합니다."
         iconSlider.target = self
         iconSlider.action = #selector(changeIconSize)
-        iconSlider.numberOfTickMarks = 11
-        iconSlider.allowsTickMarkValuesOnly = true
+        iconSlider.controlSize = .small
         iconSlider.setAccessibilityLabel("아이콘 크기")
-        spacingSlider.target = self
-        spacingSlider.action = #selector(changeSpacing)
-        spacingSlider.numberOfTickMarks = 13
-        spacingSlider.allowsTickMarkValuesOnly = true
-        spacingSlider.setAccessibilityLabel("아이콘 간격")
+        slotSlider.target = self
+        slotSlider.action = #selector(changeSlotWidth)
+        slotSlider.controlSize = .small
+        slotSlider.setAccessibilityLabel("아이콘 영역 너비")
         count.addItems(withTitles: (1...20).map { "\($0)개" })
         count.target = self
         count.action = #selector(changeCount)
         count.setAccessibilityLabel("최대 표시 개수")
+        count.controlSize = .small
+        count.toolTip = "나머지 앱은 Option+Tab으로 선택합니다."
+        count.widthAnchor.constraint(equalToConstant: 82).isActive = true
+        iconLabel.alignment = .right
+        slotLabel.alignment = .right
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 12
+        content.spacing = 10
         install(content, in: self)
-        addFullWidth(sectionTitle("표시 방식"), to: content)
-        content.addArrangedSubview(compact)
-        addFullWidth(label("공간이 부족하면 아이콘 하나로 전체 앱 메뉴를 열 수 있습니다.", secondary: true), to: content)
-        content.addArrangedSubview(running)
-        addFullWidth(label("고정하지 않은 앱도 실행 중일 때 표시합니다. 상태 점이나 배지는 추가하지 않습니다.", secondary: true), to: content)
-        addFullWidth(sectionTitle("아이콘 배치"), to: content)
         addFullWidth(formRow("아이콘 크기", control: iconSlider, trailing: iconLabel), to: content)
-        addFullWidth(formRow("아이콘 간격", control: spacingSlider, trailing: spacingLabel), to: content)
+        addFullWidth(formRow("아이콘 영역 너비", control: slotSlider, trailing: slotLabel), to: content)
         addFullWidth(formRow("최대 표시 개수", control: count), to: content)
-        addFullWidth(label("앱 수만큼 공간을 사용하며 넘친 앱은 더 보기(···)에 표시합니다.", secondary: true), to: content)
-        addFullWidth(sectionTitle("시작"), to: content)
-        content.addArrangedSubview(login)
-        addFullWidth(loginLabel, to: content)
+        let divider = NSBox()
+        divider.boxType = .separator
+        addFullWidth(divider, to: content)
+        addFullWidth(formRow("앱 목록", control: running), to: content)
+        addFullWidth(formRow("시작", control: login), to: content)
+        addFullWidth(formRow("", control: loginLabel), to: content)
         content.addArrangedSubview(NSView())
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
+    var hasLoginNotice: Bool {
+        !model.loginStatus.isEmpty && ![
+            "로그인할 때 자동으로 시작합니다.", "자동 시작이 꺼져 있습니다.",
+        ].contains(model.loginStatus)
+    }
+
     func refresh() {
         let preferences = model.preferences
-        compact.state = preferences.isCompact ? .on : .off
         running.state = preferences.showsRunningApps ? .on : .off
         login.state = model.loginEnabled ? .on : .off
         iconSlider.doubleValue = preferences.iconSize
-        spacingSlider.doubleValue = preferences.iconSpacing
+        slotSlider.doubleValue = preferences.slotWidth
         iconLabel.stringValue = "\(Int(preferences.iconSize))pt"
-        spacingLabel.stringValue = "\(Int(preferences.iconSpacing))pt"
+        slotLabel.stringValue = "\(Int(preferences.slotWidth))pt"
         count.selectItem(at: preferences.maxVisibleApps - 1)
         loginLabel.stringValue = model.loginStatus
-        compact.isEnabled = !model.isReadOnly
+        login.toolTip = model.loginStatus
+        // 체크 상태와 중복되는 정상 안내는 생략하고 설치·승인 오류는 그대로 보여 준다.
+        loginLabel.superview?.isHidden = !hasLoginNotice
         running.isEnabled = !model.isReadOnly
-        iconSlider.isEnabled = !model.isReadOnly && !preferences.isCompact
-        spacingSlider.isEnabled = iconSlider.isEnabled
+        iconSlider.isEnabled = !model.isReadOnly
+        slotSlider.isEnabled = iconSlider.isEnabled
         count.isEnabled = iconSlider.isEnabled
     }
 
@@ -384,7 +431,7 @@ private final class AppearanceSettingsPage: NSView {
     }
 
     @objc private func changeIconSize() { update(\.iconSize, iconSlider.doubleValue.rounded()) }
-    @objc private func changeSpacing() { update(\.iconSpacing, spacingSlider.doubleValue.rounded()) }
+    @objc private func changeSlotWidth() { update(\.slotWidth, slotSlider.doubleValue.rounded()) }
     @objc private func changeCount() { update(\.maxVisibleApps, count.indexOfSelectedItem + 1) }
 }
 
@@ -400,7 +447,7 @@ private final class ShortcutSettingsPage: NSView {
         self.model = model
         forward = ShortcutRecorderButton(model: model, direction: .forward)
         backward = ShortcutRecorderButton(model: model, direction: .backward)
-        reset = ActionButton(title: "기본 단축키로 복원") { [weak model] in model?.perform(.resetShortcuts) }
+        reset = ActionButton(title: "기본값 복원") { [weak model] in model?.perform(.resetShortcuts) }
         super.init(frame: .zero)
         enabled.onChange = { [weak model] value in
             guard let model else { return }
@@ -411,19 +458,13 @@ private final class ShortcutSettingsPage: NSView {
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 16
+        content.spacing = 10
         install(content, in: self)
-        addFullWidth(sectionTitle("전역 단축키"), to: content)
         content.addArrangedSubview(enabled)
         addFullWidth(formRow("다음 앱 선택", control: forward), to: content)
         addFullWidth(formRow("이전 앱 선택", control: backward), to: content)
-        addFullWidth(label("버튼을 누른 후 사용할 조합을 입력하세요. Esc는 취소입니다. 다른 앱에서 쓰는 단축키와 겹치면 새 조합을 지정하세요.", secondary: true), to: content)
-        content.addArrangedSubview(reset)
-        addFullWidth(sectionTitle("선택 패널 안에서"), to: content)
-        addFullWidth(formRow("이전 / 다음 앱", control: label("← / →")), to: content)
-        addFullWidth(formRow("선택한 앱 열기", control: label("Enter")), to: content)
-        addFullWidth(formRow("선택 취소", control: label("Esc")), to: content)
-        addFullWidth(label("Option 키를 놓아도 앱이 바로 열리지 않습니다. Enter로 선택을 확정하세요.", secondary: true), to: content)
+        addFullWidth(formRow("", control: reset), to: content)
+        addFullWidth(label("← → 이동 · Enter 열기 · Esc 취소", secondary: true), to: content)
         content.addArrangedSubview(NSView())
     }
 
@@ -460,6 +501,7 @@ private final class ShortcutRecorderButton: NSButton {
         target = self
         action = #selector(beginRecording)
         setAccessibilityLabel(direction == .forward ? "다음 앱 단축키 변경" : "이전 앱 단축키 변경")
+        toolTip = "클릭한 뒤 ⌘, ⌥ 또는 ⌃를 포함한 조합을 입력하세요. Esc로 취소합니다."
         widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
     }
 
@@ -491,7 +533,7 @@ private final class ShortcutRecorderButton: NSButton {
         guard isEnabled else { return }
         window?.makeFirstResponder(self)
         isRecording = true
-        title = "키 조합을 입력하세요…"
+        title = "키 조합 입력…"
         model.perform(.suspendShortcuts(true))
     }
 
@@ -526,6 +568,8 @@ private final class ShortcutRecorderButton: NSButton {
         resignObserver = nil
         closeObserver = nil
     }
+
+    isolated deinit { removeObservers() }
 }
 
 @MainActor
@@ -535,24 +579,24 @@ private final class HelpSettingsPage: NSView {
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 15
-        installScrollable(content, in: self)
-        addFullWidth(label("Menu Bar Dock", font: .systemFont(ofSize: 23, weight: .semibold)), to: content)
-        addFullWidth(label("필요한 앱을, 정해 둔 순서 그대로.", secondary: true), to: content)
+        content.spacing = 12
+        install(content, in: self)
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
-        addFullWidth(label("버전 \(version) · Apple Silicon · macOS 14 이상", font: .systemFont(ofSize: 11), secondary: true), to: content)
-        for (title, detail) in [
-            ("클릭해서 열기", "아이콘을 클릭하면 앱을 열거나 기존 창을 활성화합니다. 우클릭하면 고정, 숨기기, 종료 등 앱별 작업이 나타납니다."),
-            ("순서는 한 번 정하면 그대로", "앱과 순서 탭에서 목록을 드래그하거나 위로·아래로 버튼을 누르세요. Command 키를 누르고 메뉴 막대를 드래그하면 런처 전체를 옮길 수 있습니다."),
-            ("메뉴 막대가 보이지 않을 때", "노치나 다른 메뉴 때문에 공간이 부족할 수 있습니다. 단축키로 앱을 선택하거나 Finder에서 Menu Bar Dock을 다시 열어 설정을 띄우세요. 표시 개수를 줄이거나 아이콘 하나만 표시를 켜면 됩니다."),
-            ("화면과 개인정보", "시스템의 외관 설정을 따르며 다른 앱 창의 위치를 바꾸지 않습니다. 손쉬운 사용·화면 기록 권한 없이 동작하고 앱 목록은 이 Mac에만 저장합니다."),
-        ] {
-            addFullWidth(sectionTitle(title), to: content)
-            addFullWidth(label(detail, secondary: true), to: content)
-        }
+        let identity = NSStackView(views: [
+            label("Menu Bar Dock", font: .systemFont(ofSize: 16, weight: .semibold)),
+            label("버전 \(version)", secondary: true),
+        ])
+        identity.orientation = .vertical
+        identity.alignment = .leading
+        identity.spacing = 4
+        addFullWidth(identity, to: content)
         addFullWidth(horizontal([
-            ActionButton(title: "자세한 사용 안내") { [weak model] in model?.perform(.help) },
             ActionButton(title: "업데이트 확인…") { [weak model] in model?.perform(.checkForUpdates) },
+            ActionButton(title: "사용 안내") { [weak model] in model?.perform(.help) },
+            NSView(),
+        ]), to: content)
+        content.addArrangedSubview(NSView())
+        addFullWidth(horizontal([
             NSView(),
             ActionButton(title: "앱 종료") { [weak model] in model?.perform(.quit) },
         ]), to: content)
@@ -610,7 +654,15 @@ private func label(_ value: String, font: NSFont = .systemFont(ofSize: 12), seco
 }
 
 @MainActor
-private func sectionTitle(_ value: String) -> NSTextField { label(value, font: .systemFont(ofSize: 13, weight: .semibold)) }
+private func toolbarButton(_ title: String, label: String, action: (() -> Void)?) -> ActionButton {
+    let button = ActionButton(title: title, action: action)
+    button.controlSize = .small
+    button.font = .systemFont(ofSize: 13)
+    button.setAccessibilityLabel(label)
+    button.toolTip = label
+    button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+    return button
+}
 
 @MainActor
 private func horizontal(_ views: [NSView]) -> NSStackView {
@@ -624,10 +676,10 @@ private func horizontal(_ views: [NSView]) -> NSStackView {
 @MainActor
 private func formRow(_ title: String, control: NSView, trailing: NSView? = nil) -> NSStackView {
     let name = label(title)
-    name.widthAnchor.constraint(equalToConstant: 112).isActive = true
+    name.widthAnchor.constraint(equalToConstant: 104).isActive = true
     var views = [name, control]
     if let trailing {
-        trailing.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        trailing.widthAnchor.constraint(equalToConstant: 38).isActive = true
         views.append(trailing)
     } else { views.append(NSView()) }
     return horizontal(views)
@@ -638,39 +690,11 @@ private func install(_ stack: NSStackView, in parent: NSView) {
     stack.translatesAutoresizingMaskIntoConstraints = false
     parent.addSubview(stack)
     NSLayoutConstraint.activate([
-        stack.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 20),
-        stack.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -20),
-        stack.topAnchor.constraint(equalTo: parent.topAnchor, constant: 20),
-        stack.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -20),
+        stack.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 12),
+        stack.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -12),
+        stack.topAnchor.constraint(equalTo: parent.topAnchor, constant: 12),
+        stack.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -12),
     ])
-}
-
-@MainActor
-private func installScrollable(_ stack: NSStackView, in parent: NSView) {
-    let scroll = NSScrollView()
-    scroll.translatesAutoresizingMaskIntoConstraints = false
-    scroll.hasVerticalScroller = true
-    scroll.autohidesScrollers = true
-    scroll.drawsBackground = false
-    let document = FlippedSettingsDocument()
-    document.translatesAutoresizingMaskIntoConstraints = false
-    scroll.documentView = document
-    parent.addSubview(scroll)
-    install(stack, in: document)
-    NSLayoutConstraint.activate([
-        scroll.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
-        scroll.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
-        scroll.topAnchor.constraint(equalTo: parent.topAnchor),
-        scroll.bottomAnchor.constraint(equalTo: parent.bottomAnchor),
-        document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
-        document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
-        document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-    ])
-}
-
-@MainActor
-private final class FlippedSettingsDocument: NSView {
-    override var isFlipped: Bool { true }
 }
 
 @MainActor

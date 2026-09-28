@@ -302,17 +302,14 @@ final class ApplicationController {
 
     private func report(_ error: any Error) {
         presentation.notice = error.localizedDescription
-        logger.error("앱 명령 처리 실패")
+        let diagnostic = error as NSError
+        logger.error("앱 명령 처리 실패: \(diagnostic.domain, privacy: .public) (\(diagnostic.code, privacy: .public))")
         showSettings()
     }
 
     private func showHelp() {
-        let alert = NSAlert()
-        alert.messageText = "Menu Bar Dock 사용 방법"
-        alert.informativeText = "아이콘을 클릭하면 앱이 열립니다. 우클릭하면 고정·제외·숨기기·종료 메뉴가 나타납니다.\n\nOption+Tab: 다음 앱\nShift+Option+Tab: 이전 앱\nEnter: 선택한 앱 열기\nEsc: 취소\n\n설정의 앱 목록에서 순서를 드래그해 바꿀 수 있습니다. Command를 누르고 메뉴 막대를 드래그하면 전체 묶음을 옮깁니다.\n\n아이콘이 노치에 가려지면 접힌 모드나 표시 개수를 조정하세요. Finder에서 앱을 다시 열면 설정이 나타납니다."
-        alert.addButton(withTitle: "확인")
-        NSApp.activate()
-        alert.runModal()
+        guard let url = URL(string: "https://github.com/jeonghyeon-net/menubar-dock/blob/main/docs/user-guide.md") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func checkForUpdates() {
@@ -322,7 +319,7 @@ final class ApplicationController {
             guard let self else { return }
             defer { updateTask = nil }
             do {
-                let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+                let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.1"
                 switch try await releaseChecker.check(currentVersion: version) {
                 case .current: presentation.notice = "최신 버전입니다."
                 case .unpublished: presentation.notice = "아직 게시된 배포 버전이 없습니다. 현재 설치한 앱을 계속 사용할 수 있습니다."
