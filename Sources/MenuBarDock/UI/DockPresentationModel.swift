@@ -8,8 +8,7 @@ import DockShortcuts
 enum DockUIAction {
     case open(AppID)
     case openSearchResult(SearchResult)
-    case pin(AppID, Bool)
-    case exclude(AppID, Bool)
+    case save(AppID)
     case remove(AppID)
     case move(IndexSet, Int)
     case preferences(DockPreferences)

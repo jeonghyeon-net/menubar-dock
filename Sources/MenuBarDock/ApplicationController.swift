@@ -126,7 +126,7 @@ final class ApplicationController {
     private func publish() {
         let items = catalog.visibleItems(runningIDs: runningIDs)
         if presentation.items != items { presentation.items = items }
-        if presentation.apps != catalog.orderedApps { presentation.apps = catalog.orderedApps }
+        if presentation.apps != catalog.savedApps { presentation.apps = catalog.savedApps }
         if presentation.preferences != catalog.configuration.preferences {
             presentation.preferences = catalog.configuration.preferences
         }
@@ -176,10 +176,9 @@ final class ApplicationController {
                 do { try await openSearchResult(result) }
                 catch is CancellationError {} catch { report(error) }
             }
-        case .pin(let id, let value): mutate { $0.pin(id, value) }
-        case .exclude(let id, let value): mutate { $0.exclude(id, value) }
+        case .save(let id): mutate { $0.save(id) }
         case .remove(let id): mutate { $0.remove(id) }
-        case .move(let offsets, let destination): mutate { $0.move(fromOffsets: offsets, toOffset: destination) }
+        case .move(let offsets, let destination): mutate { $0.moveSaved(fromOffsets: offsets, toOffset: destination) }
         case .preferences(let value): mutate { $0.updatePreferences(value) }
         case .addApps: chooseApplications(replacing: nil)
         case .replaceApp(let id): chooseApplications(replacing: id)
@@ -224,7 +223,10 @@ final class ApplicationController {
         do {
             let urls = try readSystemDock()
             let previous = catalog.configuration
-            SystemDockCatalogImporter.importApplications(from: urls, into: &catalog) { try resolver.resolve(url: $0) }
+            SystemDockCatalogImporter.importApplications(
+                from: urls, into: &catalog,
+                resolve: { try resolver.resolve(url: $0) }, refresh: { resolver.refresh($0) }
+            )
             if previous != catalog.configuration {
                 publish()
                 scheduleSave()
@@ -267,19 +269,12 @@ final class ApplicationController {
             guard response == .OK, let self, let panel else { return }
             for url in panel.urls {
                 do {
-                    var app = try self.resolver.resolve(url: url)
-                    let match = self.catalog.orderedApps.first { self.canonicalPath($0.bundlePath) == self.canonicalPath(app.bundlePath) }
-                    if let id {
-                        if let match, match.id != id {
-                            self.presentation.notice = "이미 등록된 앱입니다. 기존 항목에서 고정 또는 순서를 변경해 주세요."
-                            continue
-                        }
-                        app.id = id
-                    } else if let match { app.id = match.id }
-                    self.mutate { catalog in
-                        if let restoredID = catalog.upsertRestoring(app) { catalog.pin(restoredID, true) }
-                    }
+                    let app = try self.resolver.resolve(url: url)
+                    // 등록 검증을 마친 값만 반영해 충돌 실패가 기존 목록을 일부 변경하지 않게 한다.
+                    var registered = self.catalog
+                    try SavedAppRegistrar.register(app, replacing: id, in: &registered)
                     self.icons.invalidate()
+                    self.mutate { $0 = registered }
                 } catch { self.report(error) }
             }
         }
@@ -384,10 +379,6 @@ final class ApplicationController {
                 }
             } catch is CancellationError {} catch { report(error) }
         }
-    }
-
-    private func canonicalPath(_ path: String) -> String {
-        URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     private func refreshShortcutLabels() {

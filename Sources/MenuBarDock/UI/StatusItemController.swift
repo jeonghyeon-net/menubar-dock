@@ -176,9 +176,11 @@ final class StatusItemController: NSObject {
         append("설정…", action: .settings, to: menu, key: ",")
         if let app = model.items.first(where: { $0.id == id })?.app {
             menu.addItem(.separator())
-            let pin = append("고정", action: .pin(id, !app.isPinned), to: menu, enabled: !model.isReadOnly)
-            pin.state = app.isPinned ? .on : .off
-            append("목록에서 숨기기", action: .exclude(id, true), to: menu, enabled: !model.isReadOnly)
+            if app.isPinned {
+                append("목록에서 제거", action: .remove(id), to: menu, enabled: !model.isReadOnly)
+            } else {
+                append("목록에 추가", action: .save(id), to: menu, enabled: !model.isReadOnly)
+            }
         }
         menu.addItem(.separator())
         append("Menu Bar Dock 종료", action: .quit, to: menu, key: "q")

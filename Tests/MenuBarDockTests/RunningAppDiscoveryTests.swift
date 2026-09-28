@@ -99,11 +99,11 @@ struct RunningAppDiscoveryTests {
         #expect(catalog.orderedApps.count == 3)
         #expect(resolutionCount == 0)
 
-        // 이름상 앞에 오는 새 앱도 기존 사용자 순서 뒤에 한 번만 추가한다.
+        // 실행 중인 임시 앱을 앞에 표시하고 저장 목록의 상대 순서는 유지한다.
         let launched = initialSnapshots + [snapshot(newlyRunning, pid: 4), snapshot(newlyRunning, pid: 5)]
         let orderAfterLaunch = originalOrder + [newlyRunning.id]
-        #expect(update(launched) == [otherPinned.id, pinned.id, newlyRunning.id])
-        #expect(update(launched) == [otherPinned.id, pinned.id, newlyRunning.id])
+        #expect(update(launched) == [newlyRunning.id, otherPinned.id, pinned.id])
+        #expect(update(launched) == [newlyRunning.id, otherPinned.id, pinned.id])
         #expect(catalog.configuration.order == orderAfterLaunch)
         #expect(catalog.orderedApps.count == 4)
         #expect(resolutionCount == 1)
@@ -112,7 +112,7 @@ struct RunningAppDiscoveryTests {
         #expect(update(initialSnapshots) == [otherPinned.id, pinned.id])
         #expect(update([]) == [otherPinned.id, pinned.id])
         #expect(catalog.configuration.order == orderAfterLaunch)
-        #expect(update([snapshot(excluded, pid: 6), snapshot(newlyRunning, pid: 7)]) == [otherPinned.id, pinned.id, newlyRunning.id])
+        #expect(update([snapshot(excluded, pid: 6), snapshot(newlyRunning, pid: 7)]) == [newlyRunning.id, otherPinned.id, pinned.id])
         #expect(catalog.orderedApps.first(where: { $0.id == excluded.id })?.isExcluded == true)
         #expect(catalog.configuration.order == orderAfterLaunch)
         #expect(resolutionCount == 1)

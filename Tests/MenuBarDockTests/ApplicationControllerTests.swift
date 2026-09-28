@@ -10,6 +10,55 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ApplicationControllerTests {
+    @Test("설정 목록에는 등록 앱만 나타나며 임시 앱 등록·부분 목록 이동이 실제 저장 순서를 바꾼다")
+    func savedListCommandsKeepRunningAppsSeparate() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let running = try #require(NSWorkspace.shared.runningApplications.first {
+            $0.activationPolicy == .regular && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+                && $0.bundleURL != nil
+        })
+        let temporary = try ApplicationResolver().resolve(url: #require(running.bundleURL))
+        let first = AppEntry(id: AppID(rawValue: "saved-first"), name: "첫 앱", bundlePath: "/fixture/first.app", isPinned: true)
+        let last = AppEntry(id: AppID(rawValue: "saved-last"), name: "끝 앱", bundlePath: "/fixture/last.app", isPinned: true)
+        let hidden = AppEntry(id: AppID(rawValue: "legacy-hidden"), name: "숨긴 앱", bundlePath: "/fixture/hidden.app", isPinned: true, isExcluded: true)
+        var preferences = DockPreferences()
+        preferences.shortcutEnabled = false
+        try await ConfigurationRepository(directory: directory).save(
+            DockConfiguration(apps: [first, temporary, hidden, last], preferences: preferences), revision: 1
+        )
+        _ = NSApplication.shared
+        let controller = ApplicationController(directory: directory, readSystemDock: { [] })
+        await controller.start(showSettings: false)
+        defer { controller.stop() }
+        let model = controller.presentation
+        #expect(model.apps.map(\.id) == [first.id, last.id])
+        #expect(model.items.first?.id == temporary.id)
+        #expect(model.items.suffix(2).map(\.id) == [first.id, last.id])
+        #expect(!model.items.contains { $0.id == hidden.id })
+
+        // 설정 행의 1번 인덱스와 전체 catalog의 1번 인덱스는 서로 다르다.
+        model.perform(.move(IndexSet(integer: 1), 0))
+        #expect(model.apps.map(\.id) == [last.id, first.id])
+        #expect(model.items.first?.id == temporary.id)
+        model.perform(.save(temporary.id))
+        #expect(model.apps.map(\.id) == [last.id, first.id, temporary.id])
+        #expect(model.items.suffix(3).map(\.id) == [last.id, first.id, temporary.id])
+        #expect(model.items.filter { $0.id == temporary.id }.count == 1)
+        model.perform(.save(temporary.id))
+        #expect(model.apps.map(\.id) == [last.id, first.id, temporary.id])
+
+        var savedOnly = model.preferences
+        savedOnly.showsRunningApps = false
+        model.perform(.preferences(savedOnly))
+        #expect(model.items.map(\.id) == model.apps.map(\.id))
+        model.perform(.remove(temporary.id))
+        savedOnly.showsRunningApps = true
+        model.perform(.preferences(savedOnly))
+        #expect(model.apps.map(\.id) == [last.id, first.id])
+        #expect(!model.items.contains { $0.id == temporary.id })
+    }
+
     @Test func separateSearchResultsCanOpenWhileAnotherLaunchIsPending() async {
         var started: [String] = []
         var pending: [String: CheckedContinuation<Void, Never>] = [:]

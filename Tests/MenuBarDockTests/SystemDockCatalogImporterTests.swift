@@ -6,6 +6,57 @@ import Testing
 @Suite("macOS Dock 고정 앱 가져오기")
 @MainActor
 struct SystemDockCatalogImporterTests {
+    @Test("이동한 삭제 앱도 Dock 동기화로 복원하지 않고 새 경로 배치에서 한 번만 확인한다")
+    func movedRemovedApplicationsStayRemovedDuringLiveDockUpdates() throws {
+        let removed = entry("removed")
+        let otherRemoved = entry("other-removed")
+        var retained = entry("retained")
+        retained.isPinned = true
+        let added = entry("added")
+        var moved = removed
+        moved.id = AppID(rawValue: "new-resolver-id")
+        moved.bundlePath = "/Applications/Moved/removed.app"
+        moved.bookmarkData = Data([4, 5])
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [removed, retained, otherRemoved]))
+        catalog.remove(removed.id)
+        catalog.remove(otherRemoved.id)
+        let apps = [moved, added, retained, moved]
+        var refreshCounts: [AppID: Int] = [:]
+        for _ in 0..<2 {
+            SystemDockCatalogImporter.importApplications(
+                from: apps.map { URL(fileURLWithPath: $0.bundlePath) }, into: &catalog,
+                resolve: { url in try #require(apps.first { $0.bundlePath == url.path }) },
+                refresh: { original in
+                    refreshCounts[original.id, default: 0] += 1
+                    return original.id == removed.id ? moved : original
+                }
+            )
+        }
+        #expect(catalog.savedApps.map(\.id) == [retained.id, added.id])
+        #expect(refreshCounts == [removed.id: 1, otherRemoved.id: 1])
+        let preserved = try #require(catalog.configuration.removedApps.first { $0.id == removed.id })
+        #expect(preserved.bundlePath == moved.bundlePath)
+        #expect(preserved.bookmarkData == moved.bookmarkData)
+        #expect(catalog.isRemoved(moved))
+    }
+
+    @Test("먼저 실행했던 앱을 Dock에 추가해도 등록 목록의 끝에 한 번만 붙인다")
+    func newlyDockedRunningApplicationAppendsToSavedOrder() throws {
+        let temporary = entry("temporary")
+        var first = entry("first")
+        first.isPinned = true
+        var last = entry("last")
+        last.isPinned = true
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [temporary, first, last]))
+        for _ in 0..<2 {
+            SystemDockCatalogImporter.importApplications(
+                from: [URL(fileURLWithPath: temporary.bundlePath)], into: &catalog, resolve: { _ in temporary }
+            )
+            #expect(catalog.savedApps.map(\.id) == [first.id, last.id, temporary.id])
+            #expect(catalog.visibleItems(runningIDs: [temporary.id]).map(\.id) == [first.id, last.id, temporary.id])
+        }
+    }
+
     @Test("실행하지 않은 Dock 앱도 고정하며 기존 순서·ID·제외를 보존한다")
     func importPreservesIntentAndIncludesStoppedApplications() {
         let existing = entry("existing")
@@ -17,9 +68,9 @@ struct SystemDockCatalogImporterTests {
         resolvedExisting.id = AppID(rawValue: "resolver-new-id")
         let fixtures = [existing.bundlePath: resolvedExisting, hidden.bundlePath: hidden, added.bundlePath: added]
         let urls = [existing, added, hidden, added].map { URL(fileURLWithPath: $0.bundlePath) }
-        let imported = SystemDockCatalogImporter.importApplications(from: urls, into: &catalog) { url in
+        let imported = SystemDockCatalogImporter.importApplications(from: urls, into: &catalog, resolve: { url in
             try #require(fixtures[url.path])
-        }
+        })
         #expect(imported == 3)
         #expect(catalog.configuration.order == [hidden.id, existing.id, added.id])
         #expect(catalog.orderedApps.allSatisfy { $0.isPinned })
@@ -35,11 +86,10 @@ struct SystemDockCatalogImporterTests {
         var catalog = DockCatalog()
         for _ in 0..<2 {
             SystemDockCatalogImporter.importApplications(
-                from: [missing, URL(fileURLWithPath: valid.bundlePath)], into: &catalog
-            ) { url in
+                from: [missing, URL(fileURLWithPath: valid.bundlePath)], into: &catalog, resolve: { url in
                 if url == missing { throw CocoaError(.fileNoSuchFile) }
                 return valid
-            }
+            })
         }
         #expect(catalog.configuration.order == [valid.id])
         #expect(catalog.orderedApps.count == 1)
@@ -77,11 +127,11 @@ struct SystemDockCatalogImporterTests {
         let app = entry("retry")
         let urls = [URL(fileURLWithPath: app.bundlePath)]
         var catalog = DockCatalog()
-        SystemDockCatalogImporter.importApplications(from: urls, into: &catalog) { _ in
+        SystemDockCatalogImporter.importApplications(from: urls, into: &catalog, resolve: { _ in
             throw CocoaError(.fileReadNoPermission)
-        }
+        })
         #expect(catalog.configuration.knownSystemDockPaths.isEmpty)
-        SystemDockCatalogImporter.importApplications(from: urls, into: &catalog) { _ in app }
+        SystemDockCatalogImporter.importApplications(from: urls, into: &catalog, resolve: { _ in app })
         #expect(catalog.visibleItems(runningIDs: []).map(\.id) == [app.id])
     }
 

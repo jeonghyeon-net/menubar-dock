@@ -9,6 +9,44 @@ import Testing
 struct WorkspaceCatalogReconcilerTests {
     private let now = Date(timeIntervalSince1970: 100_000)
 
+    @Test("실행 중 이동한 삭제 앱은 새 경로에서도 억제하고 새 경로 배치에서만 bookmark를 조회한다")
+    func movedRemovedApplicationIsNotRediscoveredAndRefreshIsBounded() throws {
+        let removed = app("removed", path: "/Applications/Before.app")
+        let anotherRemoved = app("another-removed", path: "/Applications/Hidden.app")
+        let retained = app("retained", path: "/Applications/Retained.app")
+        let added = app("added", path: "/Applications/Added.app")
+        var moved = removed
+        moved.id = AppID(rawValue: "new-resolution-id")
+        moved.bundlePath = "/Applications/Folder/After.app"
+        moved.bookmarkData = Data([7, 8])
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [removed, retained, anotherRemoved]))
+        catalog.remove(removed.id)
+        catalog.remove(anotherRemoved.id)
+        var refreshCounts: [AppID: Int] = [:]
+        var resolvedPaths: [String] = []
+        let snapshots = [snapshot(moved, pid: 1), snapshot(moved, pid: 2), snapshot(added, pid: 3), snapshot(retained, pid: 4)]
+        for _ in 0..<2 {
+            WorkspaceCatalogReconciler.reconcile(
+                catalog: &catalog, snapshots: snapshots, ownProcessIdentifier: 999, now: now,
+                resolve: { url in
+                    resolvedPaths.append(url.path)
+                    return url.path == moved.bundlePath ? moved : added
+                },
+                refresh: { original in
+                    refreshCounts[original.id, default: 0] += 1
+                    return original.id == removed.id ? moved : original
+                }
+            )
+        }
+        #expect(catalog.orderedApps.map(\.id) == [retained.id, added.id])
+        #expect(resolvedPaths == [added.bundlePath])
+        #expect(refreshCounts == [removed.id: 1, anotherRemoved.id: 1, retained.id: 1])
+        let preserved = try #require(catalog.configuration.removedApps.first { $0.id == removed.id })
+        #expect(preserved.bundlePath == moved.bundlePath)
+        #expect(preserved.bookmarkData == moved.bookmarkData)
+        #expect(catalog.isRemoved(moved))
+    }
+
     @Test("삭제한 실행 앱은 반복 관찰·종료·재실행 이후에도 목록에 다시 추가되지 않는다")
     func removedRunningApplicationStaysRemoved() {
         let removed = app("removed", path: "/Applications/Removed.app")
@@ -115,7 +153,7 @@ struct WorkspaceCatalogReconcilerTests {
             resolve: { _ in preview }, refresh: { $0 }
         )
         #expect(catalog.orderedApps.map(\.id) == [stable.id, preview.id])
-        #expect(catalog.visibleItems(runningIDs: [preview.id]).map(\.id) == [stable.id, preview.id])
+        #expect(catalog.visibleItems(runningIDs: [preview.id]).map(\.id) == [preview.id, stable.id])
     }
 
     @Test("기존 앱 경로는 bookmark를 다시 읽지 않고 관찰 시간만 제한적으로 갱신한다")

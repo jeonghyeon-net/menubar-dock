@@ -6,9 +6,28 @@ import DockDomain
 @MainActor
 struct SettingsInputCheck {
     static func main() {
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        let snapshotPath: String?
+        if arguments.count == 2, arguments[0] == "--snapshot", !arguments[1].isEmpty {
+            snapshotPath = arguments[1]
+        } else if arguments.isEmpty || arguments == ["--spacing"] {
+            snapshotPath = nil
+        } else {
+            print("사용법: check-settings-input [--spacing | --snapshot <PNG 경로>]")
+            exit(1)
+        }
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         app.finishLaunching()
+        if let snapshotPath {
+            let snapshot = SettingsSnapshot()
+            snapshot.settings.show()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                snapshot.write(to: URL(fileURLWithPath: snapshotPath))
+            }
+            app.run()
+            return
+        }
         let probe = SliderProbe()
         probe.settings.show()
         guard !descendants(probe.settings.window?.contentView).contains(where: { $0 is NSTabView }) else {
@@ -21,6 +40,63 @@ struct SettingsInputCheck {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { probe.run() }
         app.run()
+    }
+}
+
+/// 문서 이미지는 개인 화면 대신 고정된 시스템 앱만 넣은 실제 설정 뷰에서 만든다.
+@MainActor
+private final class SettingsSnapshot {
+    let model: DockPresentationModel
+    let settings: SettingsWindowController
+
+    init() {
+        let safariPaths = [
+            "/Applications/Safari.app", "/System/Applications/Safari.app",
+            "/System/Cryptexes/App/System/Applications/Safari.app"
+        ]
+        let safariPath = URL(fileURLWithPath: safariPaths.first { FileManager.default.fileExists(atPath: $0) } ?? safariPaths[0])
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        model = DockPresentationModel(imageForApp: { NSWorkspace.shared.icon(forFile: $0.bundlePath) }, perform: { _ in })
+        model.apps = [
+            AppEntry(id: AppID(rawValue: "snapshot.finder"), name: "Finder", bundleIdentifier: "com.apple.finder",
+                     bundlePath: "/System/Library/CoreServices/Finder.app", isPinned: true),
+            AppEntry(id: AppID(rawValue: "snapshot.safari"), name: "Safari", bundleIdentifier: "com.apple.Safari",
+                     bundlePath: safariPath, isPinned: true),
+            AppEntry(id: AppID(rawValue: "snapshot.terminal"), name: "Terminal", bundleIdentifier: "com.apple.Terminal",
+                     bundlePath: "/System/Applications/Utilities/Terminal.app", isPinned: true),
+            AppEntry(id: AppID(rawValue: "snapshot.notes"), name: "Notes", bundleIdentifier: "com.apple.Notes",
+                     bundlePath: "/System/Applications/Notes.app", isPinned: true),
+            AppEntry(id: AppID(rawValue: "snapshot.preview"), name: "Preview", bundleIdentifier: "com.apple.Preview",
+                     bundlePath: "/System/Applications/Preview.app", isPinned: true),
+            AppEntry(id: AppID(rawValue: "snapshot.settings"), name: "System Settings", bundleIdentifier: "com.apple.systempreferences",
+                     bundlePath: "/System/Applications/System Settings.app", isPinned: true)
+        ]
+        settings = SettingsWindowController(model: model)
+        // 기존 프레임 자동 저장 값이 문서 이미지 크기를 바꾸지 않게 한다.
+        settings.window?.setContentSize(NSSize(width: 540, height: 600))
+    }
+
+    func write(to url: URL) {
+        guard let content = settings.window?.contentView else { fail("설정 뷰 없음") }
+        // 시스템 창 배경까지 함께 그려 투명한 본문 위의 텍스트가 사라지지 않게 한다.
+        let view = content.superview ?? content
+        view.layoutSubtreeIfNeeded()
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { fail("설정 비트맵 생성 실패") }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { fail("PNG 변환 실패") }
+        do {
+            try png.write(to: url, options: .atomic)
+            print("통과: 시스템 앱 \(model.apps.count)개의 실제 설정 뷰 PNG 저장")
+            settings.close()
+            exit(0)
+        } catch {
+            fail("PNG 저장 실패: \(error.localizedDescription)")
+        }
+    }
+
+    private func fail(_ message: String) -> Never {
+        print("실패: \(message)")
+        exit(1)
     }
 }
 

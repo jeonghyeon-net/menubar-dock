@@ -264,7 +264,7 @@ struct NativeUIBehaviorTests {
         #expect(!fixture.switcher.isVisible)
     }
 
-    @Test func settingsControlsEmitOrderingAndPinCommands() throws {
+    @Test func settingsSingleColumnEmitsAddRemoveAndSavedOrderingCommands() throws {
         let fixture = UIInputFixture()
         defer { fixture.close() }
         let settings = SettingsWindowController(model: fixture.model)
@@ -274,34 +274,45 @@ struct NativeUIBehaviorTests {
         content.layoutSubtreeIfNeeded()
         let table = try #require(descendants(of: content).compactMap { $0 as? NSTableView }.first)
         #expect(table.numberOfRows == 3)
+        #expect(table.tableColumns.count == 1)
+        #expect(table.tableColumns.first?.title == "항상 표시할 앱")
+        #expect(table.accessibilityLabel() == "항상 표시할 앱")
+        let firstCell = try #require(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        #expect(descendants(of: firstCell).compactMap { $0 as? NSButton }.isEmpty)
+        #expect(descendants(of: firstCell).compactMap { $0 as? NSTextField }.contains { $0.stringValue == fixture.entries[0].name })
+        let buttons = descendants(of: content).compactMap { $0 as? NSButton }
+        let add = try #require(buttons.first { $0.accessibilityLabel() == "앱 추가" })
+        let remove = try #require(buttons.first { $0.accessibilityLabel() == "목록에서 제거" })
+        let up = try #require(buttons.first { $0.accessibilityLabel() == "위로 이동" })
+        let down = try #require(buttons.first { $0.accessibilityLabel() == "아래로 이동" })
+        #expect(!remove.isEnabled)
+        try dispatchControlAction(add)
+        #expect(fixture.actions.contains { if case .addApps = $0 { true } else { false } })
         table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        let down = try #require(descendants(of: content).compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "아래로 이동" })
+        #expect(!up.isEnabled)
+        #expect(down.isEnabled)
         try dispatchControlAction(down)
         #expect(fixture.actions.contains { action in
             if case let .move(source, target) = action { return source == IndexSet(integer: 0) && target == 2 }
             return false
         })
-        let pinCell = try #require(table.view(atColumn: 1, row: 0, makeIfNecessary: true))
-        let pin = try #require(descendants(of: pinCell).compactMap { $0 as? NSButton }.first {
-            $0.accessibilityLabel() == "\(fixture.entries[0].name) 고정"
-        })
-        pin.setNextState()
-        try dispatchControlAction(pin)
+        table.selectRowIndexes(IndexSet(integer: 2), byExtendingSelection: false)
+        #expect(up.isEnabled)
+        #expect(!down.isEnabled)
+        try dispatchControlAction(up)
         #expect(fixture.actions.contains { action in
-            if case let .pin(id, value) = action { return id == fixture.entries[0].id && !value }
+            if case let .move(source, target) = action { return source == IndexSet(integer: 2) && target == 1 }
             return false
         })
-        let visibilityCell = try #require(table.view(atColumn: 2, row: 0, makeIfNecessary: true))
-        let visibility = try #require(descendants(of: visibilityCell).compactMap { $0 as? NSButton }.first {
-            $0.accessibilityLabel() == "\(fixture.entries[0].name) 표시"
-        })
-        #expect(visibility.state == .on)
-        visibility.setNextState()
-        try dispatchControlAction(visibility)
+        try dispatchControlAction(remove)
         #expect(fixture.actions.contains { action in
-            if case let .exclude(id, value) = action { return id == fixture.entries[0].id && value }
+            if case let .remove(id) = action { return id == fixture.entries[2].id }
             return false
         })
+        let pasteboard = try #require(table.dataSource?.tableView?(table, pasteboardWriterForRow: 1) as? NSPasteboardItem)
+        #expect(pasteboard.string(forType: .init("net.jeonghyeon.MenuBarDock.app-id")) == fixture.entries[1].id.rawValue)
+        let running = try #require(buttons.first { $0.title == "실행 중인 앱 자동 표시" })
+        #expect(running.toolTip == "목록에 없는 실행 중인 앱을 앞쪽에 표시합니다.")
     }
 
     @Test func shortcutRecordingRestoresGlobalHandlingOnEscapeAndFocusLoss() throws {

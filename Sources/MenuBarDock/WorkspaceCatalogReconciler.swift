@@ -42,6 +42,7 @@ struct WorkspaceCatalogReconciler {
             uniquingKeysWith: { first, _ in first }
         )
         let originalPaths = Dictionary(uniqueKeysWithValues: knownApps.map { ($0.id, canonicalPath($0.bundlePath)) })
+        var removedByPath = Dictionary(grouping: catalog.configuration.removedApps) { canonicalPath($0.bundlePath) }
         var refreshedByPath: [String: AppEntry]?
         let applications = snapshots.filter {
             $0.isRegular && $0.processIdentifier != ownProcessIdentifier
@@ -50,6 +51,7 @@ struct WorkspaceCatalogReconciler {
         for snapshot in applications {
             guard let url = snapshot.bundleURL, url.isFileURL else { continue }
             let path = canonicalPath(url.path)
+            if removedByPath[path]?.contains(where: { matchesIdentity($0, snapshot: snapshot) }) == true { continue }
             if var existing = byPath[path], matchesIdentity(existing, snapshot: snapshot) {
                 if now.timeIntervalSince(existing.lastSeen) > 3600 {
                     existing.lastSeen = now
@@ -61,8 +63,16 @@ struct WorkspaceCatalogReconciler {
 
             // 여러 프로세스가 한꺼번에 생겨도 bookmark 복원을 항목당 한 번만 수행한다.
             if refreshedByPath == nil {
-                refreshedByPath = refreshedLocations(for: knownApps, refresh: refresh)
+                // 삭제한 앱도 이동할 수 있다. 모르는 경로가 생긴 배치에서만 삭제 기록을 함께 갱신한다.
+                for removed in catalog.configuration.removedApps {
+                    guard var refreshed = refresh(removed) else { continue }
+                    refreshed.id = removed.id
+                    catalog.refreshRemovedApp(refreshed)
+                }
+                removedByPath = Dictionary(grouping: catalog.configuration.removedApps) { canonicalPath($0.bundlePath) }
+                refreshedByPath = refreshedLocations(for: catalog.orderedApps, refresh: refresh)
             }
+            if removedByPath[path]?.contains(where: { matchesIdentity($0, snapshot: snapshot) }) == true { continue }
             if var existing = refreshedByPath?[path], matchesIdentity(existing, snapshot: snapshot) {
                 existing.lastSeen = max(now, existing.lastSeen)
                 catalog.upsert(existing)

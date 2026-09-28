@@ -131,28 +131,14 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
         table.delegate = self
         table.target = self
         table.doubleAction = #selector(openSelected)
-        table.setAccessibilityLabel("앱 표시 순서")
+        table.setAccessibilityLabel("항상 표시할 앱")
         table.toolTip = "드래그하거나 화살표 버튼으로 순서를 바꾸세요. 두 번 클릭하면 앱을 엽니다."
         let appColumn = NSTableColumn(identifier: .init("app"))
-        appColumn.title = "앱"
-        appColumn.width = 330
+        appColumn.title = "항상 표시할 앱"
+        appColumn.width = 480
         appColumn.minWidth = 220
         appColumn.resizingMask = .autoresizingMask
-        let pinColumn = NSTableColumn(identifier: .init("pin"))
-        pinColumn.title = "고정"
-        pinColumn.headerCell.alignment = .center
-        pinColumn.width = 42
-        pinColumn.minWidth = 42
-        pinColumn.maxWidth = 42
-        let visibilityColumn = NSTableColumn(identifier: .init("visibility"))
-        visibilityColumn.title = "표시"
-        visibilityColumn.headerCell.alignment = .center
-        visibilityColumn.width = 42
-        visibilityColumn.minWidth = 42
-        visibilityColumn.maxWidth = 42
         table.addTableColumn(appColumn)
-        table.addTableColumn(pinColumn)
-        table.addTableColumn(visibilityColumn)
         table.registerForDraggedTypes([Self.dragType])
         table.setDraggingSourceOperationMask(.move, forLocal: true)
         let scroll = NSScrollView()
@@ -216,27 +202,8 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
     func numberOfRows(in tableView: NSTableView) -> Int { displayedApps.count }
 
     func tableView(_ tableView: NSTableView, viewFor column: NSTableColumn?, row: Int) -> NSView? {
-        guard displayedApps.indices.contains(row), let column else { return nil }
+        guard displayedApps.indices.contains(row), column?.identifier.rawValue == "app" else { return nil }
         let app = displayedApps[row]
-        if column.identifier.rawValue == "pin" || column.identifier.rawValue == "visibility" {
-            let isPin = column.identifier.rawValue == "pin"
-            let checkbox = ActionCheckbox(title: "") { [weak model] value in
-                model?.perform(isPin ? .pin(app.id, value) : .exclude(app.id, !value))
-            }
-            checkbox.state = (isPin ? app.isPinned : !app.isExcluded) ? .on : .off
-            checkbox.isEnabled = !model.isReadOnly
-            checkbox.controlSize = .small
-            checkbox.setAccessibilityLabel("\(app.name) \(isPin ? "고정" : "표시")")
-            checkbox.toolTip = isPin ? "종료한 뒤에도 메뉴 막대에 유지" : "메뉴 막대와 앱 선택 패널에 표시"
-            let cell = NSView()
-            checkbox.translatesAutoresizingMaskIntoConstraints = false
-            cell.addSubview(checkbox)
-            NSLayoutConstraint.activate([
-                checkbox.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
-                checkbox.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            ])
-            return cell
-        }
         let cell = NSView()
         let image = NSImageView(image: model.imageForApp(app))
         image.imageScaling = .scaleProportionallyUpOrDown
@@ -326,7 +293,7 @@ private final class AppearanceSettingsPage: NSView {
         reset.controlSize = .small
         reset.setAccessibilityLabel("아이콘 크기 및 간격 기본값")
         reset.toolTip = "아이콘 크기와 간격만 기본값으로 되돌립니다."
-        running.toolTip = "고정하지 않은 앱도 실행 중일 때 메뉴 막대에 표시합니다."
+        running.toolTip = "목록에 없는 실행 중인 앱을 앞쪽에 표시합니다."
         iconSlider.target = self
         iconSlider.action = #selector(changeIconSize)
         iconSlider.controlSize = .small
