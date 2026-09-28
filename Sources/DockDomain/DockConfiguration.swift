@@ -6,16 +6,18 @@ public struct DockPreferences: Codable, Equatable, Sendable {
     public var maxVisibleApps: Int
     public var showsRunningApps: Bool
     public var shortcutEnabled: Bool
+    public var hidesFinder: Bool
 
     public init(
         iconSize: Double = 24, slotWidth: Double = 24, maxVisibleApps: Int = 6,
-        showsRunningApps: Bool = true, shortcutEnabled: Bool = true
+        showsRunningApps: Bool = true, shortcutEnabled: Bool = true, hidesFinder: Bool = false
     ) {
         self.iconSize = iconSize
         self.slotWidth = slotWidth
         self.maxVisibleApps = maxVisibleApps
         self.showsRunningApps = showsRunningApps
         self.shortcutEnabled = shortcutEnabled
+        self.hidesFinder = hidesFinder
     }
 
     public func normalized() -> Self {
@@ -28,7 +30,7 @@ public struct DockPreferences: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case iconSize, slotWidth, maxVisibleApps, showsRunningApps, shortcutEnabled
+        case iconSize, slotWidth, maxVisibleApps, showsRunningApps, shortcutEnabled, hidesFinder
     }
 
     public init(from decoder: any Decoder) throws {
@@ -38,6 +40,7 @@ public struct DockPreferences: Codable, Equatable, Sendable {
         maxVisibleApps = try values.decodeIfPresent(Int.self, forKey: .maxVisibleApps) ?? 6
         showsRunningApps = try values.decodeIfPresent(Bool.self, forKey: .showsRunningApps) ?? true
         shortcutEnabled = try values.decodeIfPresent(Bool.self, forKey: .shortcutEnabled) ?? true
+        hidesFinder = try values.decodeIfPresent(Bool.self, forKey: .hidesFinder) ?? false
     }
 }
 

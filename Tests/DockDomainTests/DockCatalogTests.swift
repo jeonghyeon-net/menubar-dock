@@ -8,6 +8,37 @@ private func entry(_ id: String, pinned: Bool = false, seen: Date = Date(timeInt
 
 @Suite("도크 순서와 사용자 정책")
 struct DockCatalogTests {
+    @Test("Finder 숨김은 등록·임시 표시만 거르고 해제하면 저장 상태와 원순서를 복원한다", arguments: [false, true])
+    func hidingFinderOnlyFiltersItsBundleIdentity(_ pinned: Bool) {
+        var finder = entry("finder", pinned: pinned)
+        finder.name = "시스템 파일 관리자"
+        finder.bundleIdentifier = "com.apple.finder"
+        var sameName = entry("another-finder", pinned: true)
+        sameName.name = "Finder"
+        sameName.bundleIdentifier = "example.finder"
+        var unknownIdentity = entry("unknown", pinned: true)
+        unknownIdentity.name = "Finder"
+        let first = entry("first", pinned: true)
+        let last = entry("last", pinned: true)
+        let original = DockConfiguration(apps: [first, finder, sameName, unknownIdentity, last]).normalized()
+        var catalog = DockCatalog(configuration: original)
+        let running: Set<AppID> = [finder.id]
+        let originalVisible = catalog.visibleItems(runningIDs: running)
+        let saved = catalog.savedApps
+        var preferences = original.preferences
+        preferences.hidesFinder = true
+        catalog.updatePreferences(preferences)
+        #expect(catalog.visibleItems(runningIDs: running) == originalVisible.filter { $0.id != finder.id })
+        #expect(catalog.savedApps == saved)
+        #expect(catalog.configuration.apps == original.apps)
+        #expect(catalog.configuration.order == original.order)
+        #expect(catalog.configuration.removedApps.isEmpty)
+        preferences.hidesFinder = false
+        catalog.updatePreferences(preferences)
+        #expect(catalog.visibleItems(runningIDs: running) == originalVisible)
+        #expect(catalog.configuration == original)
+    }
+
     @Test("저장 목록에는 항상 표시 앱만 남고 미등록 실행 앱은 앞에 한 번씩 표시한다")
     func savedProjectionSeparatesTemporaryAppsAndHonorsLegacyExclusions() {
         let first = entry("first", pinned: true)

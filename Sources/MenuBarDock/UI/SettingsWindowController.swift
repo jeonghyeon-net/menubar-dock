@@ -275,6 +275,7 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
 private final class AppearanceSettingsPage: NSView {
     private let model: DockPresentationModel
     private let running = ActionCheckbox(title: "실행 중인 앱 자동 표시", action: nil)
+    private let hideFinder = ActionCheckbox(title: "Finder 숨기기", action: nil)
     private let login = ActionCheckbox(title: "로그인할 때 시작", action: nil)
     private let iconSlider = TrackingPreferenceSlider(value: 24, minValue: 16, maxValue: 32, target: nil, action: nil)
     private let spacingSlider = TrackingPreferenceSlider(value: 0, minValue: 0, maxValue: 28, target: nil, action: nil)
@@ -288,12 +289,14 @@ private final class AppearanceSettingsPage: NSView {
         self.model = model
         super.init(frame: .zero)
         running.onChange = { [weak self] value in self?.update(\.showsRunningApps, value) }
+        hideFinder.onChange = { [weak self] value in self?.update(\.hidesFinder, value) }
         login.onChange = { [weak model] value in model?.perform(.login(value)) }
         reset.onAction = { [weak self] in self?.resetIconLayout() }
         reset.controlSize = .small
         reset.setAccessibilityLabel("아이콘 크기 및 간격 기본값")
         reset.toolTip = "아이콘 크기와 간격만 기본값으로 되돌립니다."
         running.toolTip = "목록에 없는 실행 중인 앱을 앞쪽에 표시합니다."
+        hideFinder.toolTip = "메뉴 막대와 기본 앱 전환 목록에서 Finder를 숨깁니다. 앱 검색에서는 계속 찾을 수 있습니다."
         iconSlider.target = self
         iconSlider.action = #selector(changeIconSize)
         iconSlider.controlSize = .small
@@ -325,6 +328,7 @@ private final class AppearanceSettingsPage: NSView {
         countRow.addArrangedSubview(reset)
         addFullWidth(countRow, to: content)
         addFullWidth(formRow("앱 목록", control: running), to: content)
+        addFullWidth(formRow("", control: hideFinder), to: content)
         addFullWidth(formRow("시작", control: login), to: content)
         addFullWidth(formRow("", control: loginLabel), to: content)
     }
@@ -341,6 +345,7 @@ private final class AppearanceSettingsPage: NSView {
     func refresh() {
         let preferences = model.preferences
         running.state = preferences.showsRunningApps ? .on : .off
+        hideFinder.state = preferences.hidesFinder ? .on : .off
         login.state = model.loginEnabled ? .on : .off
         iconSlider.synchronize(value: preferences.iconSize)
         spacingSlider.synchronize(value: max(0, preferences.slotWidth - preferences.iconSize))
@@ -352,6 +357,7 @@ private final class AppearanceSettingsPage: NSView {
         // 체크 상태와 중복되는 정상 안내는 생략하고 설치·승인 오류는 그대로 보여 준다.
         loginLabel.superview?.isHidden = !hasLoginNotice
         running.isEnabled = !model.isReadOnly
+        hideFinder.isEnabled = !model.isReadOnly
         iconSlider.isEnabled = !model.isReadOnly
         spacingSlider.isEnabled = iconSlider.isEnabled
         count.isEnabled = iconSlider.isEnabled

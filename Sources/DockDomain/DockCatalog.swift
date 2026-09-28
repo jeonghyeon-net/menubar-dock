@@ -179,7 +179,10 @@ public struct DockCatalog: Sendable {
             !$0.isPinned && !$0.isExcluded && runningIDs.contains($0.id)
         } : []
         // 실행 이벤트는 저장 순서를 변경하지 않는다. 임시 앱도 기존 관찰 순서만 사용한다.
-        return (temporary + savedApps).map { DockItem(app: $0, isRunning: runningIDs.contains($0.id)) }
+        // Finder 숨김은 표시 후보에만 적용해 등록 상태와 사용자가 정한 순서를 보존한다.
+        return (temporary + savedApps)
+            .filter { !configuration.preferences.hidesFinder || $0.bundleIdentifier != "com.apple.finder" }
+            .map { DockItem(app: $0, isRunning: runningIDs.contains($0.id)) }
     }
 
     /// 사용자가 고정·제외한 기록과 실행 중 앱을 보호하며 오래된 관찰 기록만 정리한다.

@@ -30,6 +30,38 @@ private func configuration(_ name: String) -> DockConfiguration {
 
 @Suite("설정 저장과 복구")
 struct ConfigurationRepositoryTests {
+    @Test("Finder 숨김은 앱·순서·다른 설정을 바꾸지 않고 켜짐과 꺼짐 모두 저장한다")
+    func finderVisibilityPreferenceSurvivesRoundTrip() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        var expected = configuration("기존 앱")
+        let finder = AppEntry(
+            id: AppID(rawValue: "finder"), name: "Finder", bundleIdentifier: "com.apple.finder",
+            bundlePath: "/System/Library/CoreServices/Finder.app", isPinned: true,
+            lastSeen: Date(timeIntervalSince1970: 1_000)
+        )
+        expected.apps.append(finder)
+        expected.order = [finder.id, expected.apps[0].id]
+        expected.preferences = DockPreferences(iconSize: 20, slotWidth: 25, maxVisibleApps: 9)
+        for (index, hidden) in [true, false].enumerated() {
+            expected.preferences.hidesFinder = hidden
+            try await fixture.repository.save(expected, revision: UInt64(index + 1))
+            let reopened = try await ConfigurationRepository(directory: fixture.directory).load()
+            #expect(reopened.warning == nil)
+            #expect(reopened.configuration == expected)
+        }
+    }
+
+    @Test("Finder 숨김 키가 없는 이전 설정은 기존 표시 상태로 읽는다", arguments: [1, 2])
+    func legacyPreferencesKeepFinderVisible(_ version: Int) async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        try Data("{\"schemaVersion\":\(version),\"preferences\":{}}".utf8).write(to: fixture.primary)
+        let loaded = try await fixture.repository.load()
+        #expect(!loaded.configuration.preferences.hidesFinder)
+        #expect(loaded.warning == nil)
+    }
+
     @Test("이전의 정상 크기 조합은 경고 없이 영역을 넓히고 새 조합을 저장한다")
     func legacyIndependentDimensionsFitWithoutCorruptionWarning() async throws {
         let fixture = try RepositoryFixture()

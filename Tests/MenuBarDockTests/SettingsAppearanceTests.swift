@@ -18,13 +18,14 @@ struct SettingsAppearanceTests {
         #expect(views.contains { ($0 as? NSSlider)?.accessibilityLabel() == "아이콘 크기" })
         #expect(views.contains { ($0 as? NSSlider)?.accessibilityLabel() == "아이콘 간격" })
         #expect(views.contains { ($0 as? NSButton)?.accessibilityLabel() == "다음 앱 단축키 변경" })
+        #expect(views.contains { ($0 as? NSButton)?.title == "Finder 숨기기" })
         #expect(!views.contains { ($0 as? NSButton)?.title == "Dock 가져오기" })
     }
 
     @Test func restoringIconLayoutPreservesTheOtherPreferences() async throws {
         let original = DockPreferences(
             iconSize: 32, slotWidth: 54, maxVisibleApps: 3,
-            showsRunningApps: false, shortcutEnabled: false
+            showsRunningApps: false, shortcutEnabled: false, hidesFinder: true
         )
         let fixture = AppearanceFixture(preferences: original)
         defer { fixture.settings.close() }
@@ -38,11 +39,41 @@ struct SettingsAppearanceTests {
         #expect(updated.maxVisibleApps == original.maxVisibleApps)
         #expect(updated.showsRunningApps == original.showsRunningApps)
         #expect(updated.shortcutEnabled == original.shortcutEnabled)
+        #expect(updated.hidesFinder == original.hidesFinder)
         await Task.yield()
         await Task.yield()
         let values = appearanceDescendants(of: fixture.settings.window?.contentView).compactMap { $0 as? NSTextField }.map(\.stringValue)
         #expect(values.contains("24pt"))
         #expect(values.contains("0pt"))
+    }
+
+    @Test func finderCheckboxPublishesPreferencesAndReflectsExternalChanges() async throws {
+        let original = DockPreferences(iconSize: 20, slotWidth: 25, maxVisibleApps: 9)
+        let fixture = AppearanceFixture(preferences: original)
+        defer { fixture.settings.close() }
+        fixture.settings.show()
+        let controls = appearanceDescendants(of: fixture.settings.window?.contentView).compactMap { $0 as? NSButton }
+        let checkbox = try #require(controls.first { $0.title == "Finder 숨기기" })
+        let action = try #require(checkbox.action)
+        #expect(checkbox.state == .off)
+        // Swift Testing의 async 실행 안에 AppKit 추적 루프를 중첩하지 않고 체크 결과를 전달한다.
+        checkbox.state = .on
+        #expect(checkbox.sendAction(action, to: checkbox.target))
+        var hidden = original
+        hidden.hidesFinder = true
+        #expect(fixture.changes == [hidden])
+        #expect(fixture.model.preferences == hidden)
+        #expect(checkbox.state == .on)
+        checkbox.state = .off
+        #expect(checkbox.sendAction(action, to: checkbox.target))
+        #expect(fixture.changes == [hidden, original])
+        #expect(fixture.model.preferences == original)
+        fixture.model.preferences = hidden
+        fixture.model.isReadOnly = true
+        await Task.yield()
+        await Task.yield()
+        #expect(checkbox.state == .on)
+        #expect(!checkbox.isEnabled)
     }
 
     @Test func changingIconSizePreservesSpacingAndSpacingCanReachZero() async throws {
