@@ -127,11 +127,11 @@ final class SwitcherController: NSObject, NSWindowDelegate, NSSearchFieldDelegat
         panel.contentView = content
 
         let field = NSSearchField()
-        field.placeholderString = "앱, 파일, 폴더 검색"
+        field.placeholderString = "앱 검색"
         field.font = .systemFont(ofSize: 15)
         field.focusRingType = .none
         field.delegate = self
-        field.setAccessibilityLabel("Spotlight 검색")
+        field.setAccessibilityLabel("앱 검색")
         // 입력창과 field editor는 이동·검색 결과 갱신 중 교체하지 않는다.
         content.addSubview(field)
         searchField = field
@@ -148,7 +148,7 @@ final class SwitcherController: NSObject, NSWindowDelegate, NSSearchFieldDelegat
     private func render() {
         guard let panel, let session, let content, let searchField, let dockView, let resultsView else { return }
         let width = min(max(420, CGFloat(session.ids.count) * 64 + 32), min(capturedScreenFrame?.width ?? 760, 620) - 32)
-        let bodyHeight: CGFloat = hasQuery ? max(104, CGFloat(min(6, searchSession.results.count)) * 46) : 116
+        let bodyHeight: CGFloat = hasQuery ? max(60, CGFloat(min(6, searchSession.results.count)) * 46 + 8) : 116
         let height = bodyHeight + 44
         let oldFrame = panel.frame
         panel.setFrame(NSRect(x: oldFrame.midX - width / 2, y: oldFrame.maxY - height, width: width, height: height), display: true)

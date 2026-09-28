@@ -6,6 +6,45 @@ import Testing
 
 // 기존 AppKit 입력 suite의 직렬 실행을 공유하여 창 사이의 포커스 경쟁을 피한다.
 extension NativeUIBehaviorTests {
+    @Test func applicationSearchRowsShowOneReadableNameWithoutAPath() async throws {
+        let fixture = SearchInputFixture()
+        defer { fixture.close() }
+        try fixture.show()
+        let field = try fixture.field()
+        #expect(field.placeholderString == "앱 검색")
+        #expect(field.accessibilityLabel() == "앱 검색")
+        try fixture.editor().insertText("report", replacementRange: NSRange(location: 0, length: 0))
+        try await fixture.waitForQuery("report")
+        fixture.search.deliver(fixture.results, request: 0)
+        fixture.window?.contentView?.layoutSubtreeIfNeeded()
+        let table = try fixture.table()
+        #expect(table.accessibilityLabel() == "앱 검색 결과")
+        #expect(table.numberOfRows == fixture.results.count)
+        for (row, result) in fixture.results.enumerated() {
+            let cell = try #require(table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView)
+            cell.layoutSubtreeIfNeeded()
+            let labels = searchDescendants(cell).compactMap { $0 as? NSTextField }
+            #expect(labels.count == 1)
+            let label = try #require(labels.first)
+            let icon = try #require(cell.imageView)
+            #expect(label.stringValue == result.name)
+            #expect(label.font?.pointSize == 15)
+            #expect(label.maximumNumberOfLines == 1)
+            #expect(icon.image != nil)
+            #expect(icon.frame.size == NSSize(width: 32, height: 32))
+            #expect(label.frame.midY == cell.bounds.midY)
+            #expect(icon.frame.midY == cell.bounds.midY)
+            #expect(cell.toolTip == nil)
+            #expect(cell.accessibilityLabel() == result.name)
+            #expect(table.rect(ofRow: row).maxY <= table.visibleRect.maxY)
+        }
+        let expandedHeight = fixture.window?.frame.height ?? 0
+        fixture.search.deliver([fixture.results[0]], request: 0)
+        fixture.window?.contentView?.layoutSubtreeIfNeeded()
+        #expect((fixture.window?.frame.height ?? 0) < expandedHeight)
+        #expect(table.rect(ofRow: 0).maxY <= table.visibleRect.maxY)
+    }
+
     @Test func searchTypingPreservesTheFieldEditorAndRejectsOldResults() async throws {
         let fixture = SearchInputFixture()
         defer { fixture.close() }
@@ -125,8 +164,8 @@ private final class SearchInputFixture {
     }
     let results = [
         SearchResult(url: URL(fileURLWithPath: "/fixture/Report.app"), name: "Report", kind: .application),
-        SearchResult(url: URL(fileURLWithPath: "/fixture/Reports"), name: "Reports", kind: .folder),
-        SearchResult(url: URL(fileURLWithPath: "/fixture/report.pdf"), name: "report.pdf", kind: .file),
+        SearchResult(url: URL(fileURLWithPath: "/fixture/ReportEditor.app"), name: "ReportEditor", kind: .application),
+        SearchResult(url: URL(fileURLWithPath: "/fixture/ReportViewer.app"), name: "ReportViewer", kind: .application),
     ]
     let search = ControllableSearch()
     var actions: [DockUIAction] = []

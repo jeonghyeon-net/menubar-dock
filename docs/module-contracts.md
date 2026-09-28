@@ -61,8 +61,8 @@ AppKit/Carbon 경계다. 다른 로컬 target에 의존하지 않는다.
 
 - `SearchResult`/`SearchSession` (`DockDomain`): 파일 URL·이름·종류와 검색어별 선택 상태. 새 검색어는 결과를 즉시 비우고 동일 검색어의 갱신은 선택 ID를 보존한다.
 - `SpotlightSearching` (`DockPlatform`): `search(_:receive:)`/`cancel()`. 결과·완료·오류를 `SpotlightSearchUpdate`로 전달하며 AppKit/Foundation 조회 객체는 모듈 밖으로 내보내지 않는다.
-- `SpotlightSearchService`: `NSMetadataQuery`로 기존 색인을 읽고 숨김·앱 내부 결과를 제외한다. 취소된 요청의 콜백은 무시한다.
-- `SearchResultOpener`: 결과를 실행 직전에 다시 검증한다. 앱은 기존 resolver/launcher, 파일·폴더는 `NSWorkspace`를 사용한다.
-- `SwitcherController`: 네이티브 검색 입력과 100ms 입력 지연 처리, 세션별 요청 격리, 앱 선택 복원. 검색 결과는 `DockUIAction.openSearchResult`로 실행하며 catalog에 추가하지 않는다.
+- `SpotlightSearchService`: `NSMetadataQuery`의 앱 번들 조건으로 기존 색인을 읽고 실행 가능한 앱만 반환한다. 숨김·SDK·프레임워크·앱 내부 결과를 제외한다. 취소된 요청의 콜백은 무시한다.
+- `SearchResultOpener`: 앱 종류·로컬 URL·실행 가능 여부와 bundle ID를 실행 직전에 다시 검증하고 기존 resolver/launcher로 연다. 파일·폴더 결과는 거부한다.
+- `SwitcherController`: 네이티브 검색 입력과 100ms 입력 지연 처리, 세션별 요청 격리, 앱 선택 복원. 검색 결과는 경로 없이 아이콘과 앱 이름만 표시한다. `DockUIAction.openSearchResult`로 실행하며 catalog에 추가하지 않는다.
 
 `SystemDockReader.applicationURLs()`는 macOS Dock을 변경하지 않고 Finder와 고정 앱의 로컬 URL을 순서대로 읽는다. 조립 계층의 `SystemDockCatalogImporter`는 기존 ID·순서·제외·삭제를 유지하며 처음 발견한 Dock 앱만 등록 목록 끝에 합친다. `SystemDockMonitor.start(onChange:)`는 파일 변경 감시를 시작하며 실패 시 오류를 던진다. `stop()`은 감시와 대기 작업을 정리한다. 삭제 기록과 기존 Dock 경로는 `removedApps`·`knownSystemDockPaths`에 저장한다.

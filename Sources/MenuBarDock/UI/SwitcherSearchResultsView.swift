@@ -25,7 +25,7 @@ final class SwitcherSearchResultsView: NSView, NSTableViewDataSource, NSTableVie
         table.delegate = self
         table.target = self
         table.action = #selector(openClickedResult)
-        table.setAccessibilityLabel("Spotlight 검색 결과")
+        table.setAccessibilityLabel("앱 검색 결과")
         scroll.documentView = table
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -104,18 +104,16 @@ private final class SearchResultRow: NSTableRowView {
 private final class SearchResultCell: NSTableCellView {
     private let icon = NSImageView()
     private let name = NSTextField(labelWithString: "")
-    private let location = NSTextField(labelWithString: "")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        name.font = .systemFont(ofSize: 13)
+        name.font = .systemFont(ofSize: 15)
         name.lineBreakMode = .byTruncatingTail
-        location.font = .systemFont(ofSize: 11)
-        location.textColor = .secondaryLabelColor
-        location.lineBreakMode = .byTruncatingMiddle
+        name.maximumNumberOfLines = 1
+        icon.imageScaling = .scaleProportionallyDown
+        icon.setAccessibilityElement(false)
         addSubview(icon)
         addSubview(name)
-        addSubview(location)
         imageView = icon
         textField = name
     }
@@ -124,17 +122,13 @@ private final class SearchResultCell: NSTableCellView {
 
     func configure(_ result: SearchResult) {
         name.stringValue = result.name
-        let parent = result.url.deletingLastPathComponent().path
-        location.stringValue = (parent as NSString).abbreviatingWithTildeInPath
         icon.image = NSWorkspace.shared.icon(forFile: result.url.path)
-        toolTip = result.url.path
-        setAccessibilityLabel("\(result.name), \(location.stringValue)")
+        setAccessibilityLabel(result.name)
     }
 
     override func layout() {
         super.layout()
-        icon.frame = NSRect(x: 8, y: 6, width: 32, height: 32)
-        name.frame = NSRect(x: 50, y: 23, width: max(0, bounds.width - 62), height: 17)
-        location.frame = NSRect(x: 50, y: 5, width: max(0, bounds.width - 62), height: 16)
+        icon.frame = NSRect(x: 8, y: (bounds.height - 32) / 2, width: 32, height: 32)
+        name.frame = NSRect(x: 50, y: (bounds.height - 20) / 2, width: max(0, bounds.width - 62), height: 20)
     }
 }

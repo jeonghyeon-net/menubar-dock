@@ -37,6 +37,7 @@ protocol SpotlightQuerying: AnyObject {
 
 @MainActor
 public final class SpotlightSearchService: SpotlightSearching {
+    private static let resultPolicy = SpotlightResultPolicy()
     private let makeQuery: @MainActor () -> any SpotlightQuerying
     private let resolveResult: @MainActor (SpotlightMetadataResult) -> SearchResult?
     private let maximumResults: Int
@@ -112,8 +113,9 @@ public final class SpotlightSearchService: SpotlightSearching {
                 NSPredicate(format: "%K CONTAINS[cd] %@", NSMetadataItemDisplayNameKey, word),
             ])
         }
-        // Spotlight는 일반 NSPredicate와 달리 자식이 하나뿐인 AND를 예외로 거절한다.
-        return predicates.count == 1 ? predicates[0] : NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        // 이름이 같아도 SDK·문서·폴더는 조회 단계에서 제외한다. AND에는 항상 두 항 이상이 있다.
+        let application = NSPredicate(format: "%K == %@", NSMetadataItemContentTypeKey, "com.apple.application-bundle")
+        return NSCompoundPredicate(andPredicateWithSubpredicates: [application] + predicates)
     }
 
     private func consume(requestID id: UUID, isComplete: Bool) {
@@ -187,33 +189,46 @@ public final class SpotlightSearchService: SpotlightSearching {
     }
 
     static func resolve(_ metadata: SpotlightMetadataResult) -> SearchResult? {
+        resolve(metadata, policy: resultPolicy)
+    }
+
+    static func resolve(_ metadata: SpotlightMetadataResult, policy: SpotlightResultPolicy) -> SearchResult? {
         guard metadata.url.isFileURL else { return nil }
-        let original = metadata.url.standardizedFileURL
-        let url = canonicalApplicationURL(original)
-        let paths = [original, url]
-        guard paths.allSatisfy({ candidate in
-            !candidate.pathComponents.contains(where: { $0.hasPrefix(".") })
-                && !candidate.deletingLastPathComponent().pathComponents.contains(where: { $0.lowercased().hasSuffix(".app") })
-        }), FileManager.default.isReadableFile(atPath: url.path),
-            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey, .isHiddenKey]),
-            values.isHidden != true
+        guard let paths = resolvedPaths(metadata.url), let url = paths.last,
+            url.pathExtension.lowercased() == "app", paths.allSatisfy({ policy.allowsApplicationPath($0) }),
+            FileManager.default.isReadableFile(atPath: url.path),
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
+            values.isDirectory == true, values.isHidden != true,
+            let bundle = Bundle(url: url), let executable = bundle.executableURL,
+            FileManager.default.isExecutableFile(atPath: executable.path)
         else { return nil }
-        let kind: SearchResult.Kind
-        var bundleIdentifier: String?
-        if values.isDirectory == true {
-            if url.pathExtension.lowercased() == "app" {
-                guard let bundle = Bundle(url: url), let executable = bundle.executableURL,
-                      FileManager.default.isExecutableFile(atPath: executable.path) else { return nil }
-                kind = .application
-                bundleIdentifier = bundle.bundleIdentifier
-            } else { kind = .folder }
-        } else if values.isRegularFile == true {
-            kind = .file
-        } else { return nil }
+        let packageType = bundle.object(forInfoDictionaryKey: "CFBundlePackageType") as? String
+        let isSystemFinder = packageType == "FNDR" && bundle.bundleIdentifier == "com.apple.finder"
+            && url.path == "/System/Library/CoreServices/Finder.app"
+        guard packageType == "APPL" || isSystemFinder else { return nil }
         let name = metadata.name.trimmingCharacters(in: .whitespacesAndNewlines)
         return SearchResult(
-            url: url, name: name.isEmpty ? url.lastPathComponent : name, kind: kind, bundleIdentifier: bundleIdentifier
+            url: url, name: name.isEmpty ? url.lastPathComponent : name, kind: .application, bundleIdentifier: bundle.bundleIdentifier
         )
+    }
+
+    private static func resolvedPaths(_ original: URL) -> [URL]? {
+        var paths: [URL] = []
+        var current = original.standardizedFileURL
+        var visited: Set<URL> = []
+        // 별칭의 대상은 UI·볼륨 마운트 없이 확인하고 순환이나 과도한 연결은 거절한다.
+        for _ in 0..<8 {
+            guard current.isFileURL, visited.insert(current).inserted else { return nil }
+            paths.append(current)
+            current = canonicalApplicationURL(current)
+            if paths.last != current { paths.append(current) }
+            guard let values = try? current.resourceValues(forKeys: [.isAliasFileKey, .isHiddenKey]),
+                  values.isHidden != true else { return nil }
+            guard values.isAliasFile == true else { return paths }
+            guard let target = try? URL(resolvingAliasFileAt: current, options: [.withoutUI, .withoutMounting]) else { return nil }
+            current = target.standardizedFileURL
+        }
+        return nil
     }
 
     isolated deinit { snapshotTask?.cancel(); query?.stop() }

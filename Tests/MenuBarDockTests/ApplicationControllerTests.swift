@@ -71,7 +71,7 @@ struct ApplicationControllerTests {
             }
         )
         let first = SearchResult(url: URL(fileURLWithPath: "/fixture/first.app"), name: "첫 앱", kind: .application)
-        let second = SearchResult(url: URL(fileURLWithPath: "/fixture/second.pdf"), name: "두 번째 문서", kind: .file)
+        let second = SearchResult(url: URL(fileURLWithPath: "/fixture/second.app"), name: "두 번째 앱", kind: .application)
         let originalApps = controller.presentation.apps
         controller.presentation.perform(.openSearchResult(first))
         controller.presentation.perform(.openSearchResult(first))

@@ -34,11 +34,9 @@ private final class SearchInputProbe {
     ].enumerated().map { index, app in
         AppEntry(id: AppID(rawValue: "input-\(index)"), name: app.0, bundlePath: app.1, isPinned: true)
     }
-    private let results = [
-        SearchResult(url: URL(fileURLWithPath: "/Applications/Report.app"), name: "Report", kind: .application),
-        SearchResult(url: URL(fileURLWithPath: "/Users/test/Documents/Reports"), name: "Reports", kind: .folder),
-        SearchResult(url: URL(fileURLWithPath: "/Users/test/Documents/report.pdf"), name: "report.pdf", kind: .file),
-    ]
+    private lazy var results = entries.map {
+        SearchResult(url: URL(fileURLWithPath: $0.bundlePath), name: $0.name, kind: .application)
+    }
     private let search = ProbeSearch()
     private var actions: [DockUIAction] = []
     private var window: NSWindow?
@@ -63,6 +61,7 @@ private final class SearchInputProbe {
         search.deliver(results, request: 0)
         require(field() === input && editor() === originalEditor, "결과 수신 중 입력창 또는 field editor 교체")
         require(window?.firstResponder === originalEditor, "결과 수신 뒤 입력 포커스 상실")
+        checkApplicationRows()
         try saveSnapshot(option: "--snapshot")
         try await key(125, characters: "\u{f701}")
         require(table().selectedRow == 1, "아래 방향키가 검색 결과를 선택하지 않음")
@@ -127,7 +126,7 @@ private final class SearchInputProbe {
         require(field().stringValue == "ㅎ", "한글 조합 확정 뒤 검색어 불일치")
         try await settleSearch("ㅎ", count: requestsBeforeComposition + 1)
         switcher.tearDown()
-        print("통과: 실제 검색 입력·포커스 유지·빈 영역 클릭·caret·방향키·Enter·Esc·Option+Tab 중복 방지·늦은 응답·창 재개·한글 조합 확정 후 검색")
+        print("통과: 앱 아이콘·15pt 이름 한 줄·실제 검색 입력·포커스 유지·빈 영역 클릭·caret·방향키·Enter·Esc·Option+Tab 중복 방지·늦은 응답·창 재개·한글 조합 확정 후 검색")
         exit(0)
     }
 
@@ -151,6 +150,24 @@ private final class SearchInputProbe {
     private func table() -> NSTableView {
         guard let table = probeDescendants(window?.contentView).compactMap({ $0 as? NSTableView }).first else { fail("검색 결과 table 없음") }
         return table
+    }
+
+    private func checkApplicationRows() {
+        require(field().placeholderString == "앱 검색" && field().accessibilityLabel() == "앱 검색", "검색창 앱 전용 안내 누락")
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let table = table()
+        require(table.numberOfRows == results.count, "앱 검색 결과 행 수 불일치")
+        for (row, result) in results.enumerated() {
+            guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView else { fail("앱 검색 행 없음") }
+            cell.layoutSubtreeIfNeeded()
+            let labels = probeDescendants(cell).compactMap { $0 as? NSTextField }
+            require(labels.count == 1 && labels.first?.stringValue == result.name, "앱 이름 외의 경로 또는 보조 텍스트가 남아 있음")
+            require(labels.first?.font?.pointSize == 15, "앱 이름 글자 크기 불일치")
+            require(cell.imageView?.image != nil && cell.imageView?.frame.size == NSSize(width: 32, height: 32), "앱 아이콘 크기 불일치")
+            require(labels.first?.frame.midY == cell.bounds.midY && cell.imageView?.frame.midY == cell.bounds.midY, "앱 이름과 아이콘이 수직 중앙에 맞지 않음")
+            require(cell.toolTip == nil && cell.accessibilityLabel() == result.name, "앱 이름에 불필요한 경로 안내가 남아 있음")
+            require(table.rect(ofRow: row).maxY <= table.visibleRect.maxY, "앱 검색 결과 행 아래쪽이 잘림")
+        }
     }
 
     private func key(_ code: UInt16, characters: String, flags: NSEvent.ModifierFlags = []) async throws {

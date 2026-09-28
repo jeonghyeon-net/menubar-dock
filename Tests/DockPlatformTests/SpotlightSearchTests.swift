@@ -21,12 +21,17 @@ struct SpotlightSearchTests {
     @Test("공백 단어는 AND이며 별표·물음표·따옴표를 문자 그대로 검색한다")
     func predicateUsesLiteralWordsAcrossBothNames() throws {
         let predicate = try #require(SpotlightSearchService.predicate(for: "  계획 *?'  "))
-        let matching = [NSMetadataItemFSNameKey: "계획.txt", NSMetadataItemDisplayNameKey: "메모 *?' 초안"]
-        let wildcardOnly = [NSMetadataItemFSNameKey: "계획.txt", NSMetadataItemDisplayNameKey: "메모 아무거나 초안"]
-        let missingWord = [NSMetadataItemFSNameKey: "다른.txt", NSMetadataItemDisplayNameKey: "메모 *?' 초안"]
+        let matching = [NSMetadataItemFSNameKey: "계획.app", NSMetadataItemDisplayNameKey: "메모 *?' 초안", NSMetadataItemContentTypeKey: "com.apple.application-bundle"]
+        let wildcardOnly = [NSMetadataItemFSNameKey: "계획.app", NSMetadataItemDisplayNameKey: "메모 아무거나 초안", NSMetadataItemContentTypeKey: "com.apple.application-bundle"]
+        let missingWord = [NSMetadataItemFSNameKey: "다른.app", NSMetadataItemDisplayNameKey: "메모 *?' 초안", NSMetadataItemContentTypeKey: "com.apple.application-bundle"]
         #expect(predicate.evaluate(with: matching))
         #expect(!predicate.evaluate(with: wildcardOnly))
         #expect(!predicate.evaluate(with: missingWord))
+        for type in ["public.plain-text", "public.folder", "com.apple.framework"] {
+            var document = matching
+            document[NSMetadataItemContentTypeKey] = type
+            #expect(!predicate.evaluate(with: document))
+        }
     }
 
     @Test("실제 Spotlight query가 한 단어와 여러 단어 predicate를 수용한다")
@@ -158,7 +163,7 @@ struct SpotlightSearchTests {
         #expect(query.stops == 1)
     }
 
-    @Test("앱·폴더·파일만 반환하고 숨김·앱 내부·없는 경로는 제외한다")
+    @Test("실행 가능한 앱만 반환하고 문서·폴더·숨김·앱 내부·없는 경로는 제외한다")
     func resolvesAccessibleSyntheticItems() throws {
         let fixture = try PlatformFixture()
         let document = fixture.directory.appendingPathComponent("document.txt")
@@ -167,9 +172,7 @@ struct SpotlightSearchTests {
         try Data().write(to: hidden)
         let inside = fixture.applicationURL.appendingPathComponent("Contents/Info.plist")
         #expect(SpotlightSearchService.resolve(SpotlightMetadataResult(url: fixture.applicationURL, name: "앱"))?.kind == .application)
-        #expect(SpotlightSearchService.resolve(SpotlightMetadataResult(url: fixture.directory, name: "폴더"))?.kind == .folder)
-        #expect(SpotlightSearchService.resolve(SpotlightMetadataResult(url: document, name: "문서"))?.kind == .file)
-        for url in [hidden, inside, fixture.directory.appendingPathComponent("missing")] {
+        for url in [fixture.directory, document, hidden, inside, fixture.directory.appendingPathComponent("missing")] {
             #expect(SpotlightSearchService.resolve(SpotlightMetadataResult(url: url, name: "거절")) == nil)
         }
         let remote = try #require(URL(string: "https://example.invalid/file.txt"))
@@ -192,32 +195,44 @@ struct SpotlightSearchTests {
         #expect(Set(results.map(\.id)).count == 2)
     }
 
-    @Test("검색 실행은 앱과 문서의 OS 경계를 구분한다")
+    @Test("Safari 검색에서 SDK 프레임워크와 링크 스텁을 결과로 반환하지 않는다")
+    func rejectsSDKFrameworkAndLinkStubAtResolutionBoundary() throws {
+        let fixture = try PlatformFixture()
+        let sdk = fixture.directory.appendingPathComponent("Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+        let framework = sdk.appendingPathComponent("System/Library/Frameworks/Safari.framework")
+        try FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
+        let stub = framework.appendingPathComponent("Safari.tbd")
+        try Data().write(to: stub)
+        #expect(SpotlightSearchService.resolve(SpotlightMetadataResult(url: framework, name: "Safari.framework")) == nil)
+        #expect(SpotlightSearchService.resolve(SpotlightMetadataResult(url: stub, name: "Safari.tbd")) == nil)
+    }
+
+    @Test("검색 실행은 검증한 앱만 OS 경계로 전달한다")
     func openerRoutesWithoutLaunchingRealApplications() async throws {
         let fixture = try PlatformFixture()
         let file = fixture.directory.appendingPathComponent("document.txt")
         try Data().write(to: file)
-        var applications: [URL] = []
-        var documents: [URL] = []
-        let opener = SearchResultOpener(openApplication: { applications.append($0) }, openDocument: { documents.append($0) })
+        var applications: [AppEntry] = []
+        let opener = SearchResultOpener(openApplication: { applications.append($0) })
         try await opener.open(SearchResult(url: fixture.applicationURL, name: "앱", kind: .application))
-        try await opener.open(SearchResult(url: file, name: "문서", kind: .file))
-        try await opener.open(SearchResult(url: fixture.directory, name: "폴더", kind: .folder))
-        #expect(applications == [canonicalApplicationURL(fixture.applicationURL)])
-        #expect(documents == [canonicalApplicationURL(file), canonicalApplicationURL(fixture.directory)])
+        for item in [SearchResult(url: file, name: "문서", kind: .file), SearchResult(url: fixture.directory, name: "폴더", kind: .folder)] {
+            await #expect(throws: SearchResultOpenError.notApplication) { try await opener.open(item) }
+        }
+        #expect(applications.map(\.bundlePath) == [canonicalApplicationURL(fixture.applicationURL).path])
+        #expect(applications.first?.bookmarkData != nil)
     }
 
     @Test("사라진 경로와 비파일 URL은 OS 열기 전에 거절한다")
     func openerRejectsUnavailableTargets() async throws {
         let fixture = try PlatformFixture()
         var calls = 0
-        let opener = SearchResultOpener(openApplication: { _ in calls += 1 }, openDocument: { _ in calls += 1 })
+        let opener = SearchResultOpener(openApplication: { _ in calls += 1 })
         let remote = try #require(URL(string: "https://example.invalid/file"))
         await #expect(throws: SearchResultOpenError.notFileURL) {
             try await opener.open(SearchResult(url: remote, name: "원격", kind: .file))
         }
         await #expect(throws: SearchResultOpenError.unavailable) {
-            try await opener.open(SearchResult(url: fixture.directory.appendingPathComponent("missing"), name: "없음", kind: .file))
+            try await opener.open(SearchResult(url: fixture.directory.appendingPathComponent("missing.app"), name: "없음", kind: .application))
         }
         #expect(calls == 0)
     }
@@ -226,22 +241,26 @@ struct SpotlightSearchTests {
     func openerRejectsReplacedResults() async throws {
         let fixture = try PlatformFixture()
         var calls = 0
-        let opener = SearchResultOpener(openApplication: { _ in calls += 1 }, openDocument: { _ in calls += 1 })
+        let opener = SearchResultOpener(openApplication: { _ in calls += 1 })
         await #expect(throws: SearchResultOpenError.unavailable) {
             try await opener.open(SearchResult(url: fixture.applicationURL, name: "앱", kind: .application, bundleIdentifier: "different.app"))
         }
-        await #expect(throws: SearchResultOpenError.unavailable) {
+        await #expect(throws: SearchResultOpenError.notApplication) {
             try await opener.open(SearchResult(url: fixture.applicationURL, name: "문서", kind: .file))
+        }
+        let invalid = try PlatformFixture(executable: false)
+        await #expect(throws: SearchResultOpenError.unavailable) {
+            try await opener.open(SearchResult(url: invalid.applicationURL, name: "실행 파일 없음", kind: .application))
         }
         #expect(calls == 0)
     }
 
-    @Test("문서 실행 실패는 파일 경로를 노출하지 않는 오류로 변환한다")
-    func documentFailureUsesLocalizedError() async throws {
+    @Test("앱 실행 실패는 파일 경로를 노출하지 않는 오류로 변환한다")
+    func applicationFailureUsesLocalizedError() async throws {
         let fixture = try PlatformFixture()
-        let opener = SearchResultOpener(openApplication: { _ in }, openDocument: { _ in throw CocoaError(.fileReadNoPermission) })
+        let opener = SearchResultOpener(openApplication: { _ in throw CocoaError(.fileReadNoPermission) })
         await #expect(throws: SearchResultOpenError.cannotOpen) {
-            try await opener.open(SearchResult(url: fixture.directory, name: "폴더", kind: .folder))
+            try await opener.open(SearchResult(url: fixture.applicationURL, name: "앱", kind: .application))
         }
     }
 }
