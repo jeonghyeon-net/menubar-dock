@@ -7,12 +7,12 @@
 - `DockPreferences`: Codable/Equatable/Sendable. public var `iconSize: Double = 24`, `slotWidth: Double = 24`, `maxVisibleApps: Int = 6`, `showsRunningApps: Bool = true`, `shortcutEnabled: Bool = true`. 검증/정규화 제공. `slotWidth >= iconSize`를 보장한다.
 - `DockConfiguration`: Codable/Equatable/Sendable. `schemaVersion: Int`, `apps: [AppEntry]`, `order: [AppID]`, `preferences: DockPreferences`, `removedApps: [AppEntry]`, `knownSystemDockPaths: [String]`. 기본 생성자. 중복·범위 정규화.
 - `DockItem`: Equatable/Sendable/Identifiable. `app: AppEntry`, `isRunning: Bool`, id는 app.id.
-- `DockCatalog`: 값 타입 aggregate. `configuration: DockConfiguration`, init(configuration:), upsert(AppEntry), pin(AppID, Bool), exclude(AppID, Bool), remove(AppID, suppressRediscovery: Bool = true), upsertRestoring(AppEntry), isRemoved(AppEntry), move(fromOffsets: IndexSet, toOffset: Int), updatePreferences(DockPreferences), orderedApps, visibleItems(runningIDs: Set<AppID>). 순서 불변식 보장.
-- `SwitcherSession`: 순서/선택만 관리. init(ids: [AppID], currentID: AppID?, direction: Int), `selectedID`, `ids`, move(Int), reconcile(validIDs: Set<AppID>).
+- `DockCatalog`: 값 타입 aggregate. `configuration: DockConfiguration`, `init(configuration:)`, `upsert(AppEntry)`, `pin(AppID, Bool)`, `exclude(AppID, Bool)`, `remove(AppID, suppressRediscovery: Bool = true)`, `upsertRestoring(AppEntry)`, `isRemoved(AppEntry)`, `move(fromOffsets: IndexSet, toOffset: Int)`, `updatePreferences(DockPreferences)`, `orderedApps`, `visibleItems(runningIDs: Set<AppID>)`. 순서 불변식 보장.
+- `SwitcherSession`: 순서/선택만 관리. `init(ids: [AppID], currentID: AppID?, direction: Int)`, `selectedID`, `ids`, `move(Int)`, `reconcile(validIDs: Set<AppID>)`.
 
 ## DockPersistence
 
-`ConfigurationRepository` actor. init(directory: URL), load() throws -> ConfigurationLoadResult, save(DockConfiguration, revision: UInt64) throws.
+`ConfigurationRepository` actor. `init(directory: URL)`, `load() throws -> ConfigurationLoadResult`, `save(DockConfiguration, revision: UInt64) throws`.
 `ConfigurationLoadResult`는 `configuration`, `warning: String?`, `isReadOnly: Bool`을 제공한다. 미래 schema를 덮어쓰지 않는다. 저장은 원자 교체와 마지막 정상 백업, revision 역전 방지를 수행한다.
 
 ## DockPlatform
@@ -20,11 +20,11 @@
 모든 AppKit 연동은 명시적 MainActor. NSRunningApplication/NSImage를 도메인에 전달하지 않는다.
 
 - `RunningAppSnapshot`: Sendable 값. `processIdentifier: Int32`, `bundleURL: URL?`, `bundleIdentifier: String?`, `name: String`, `isRegular: Bool`, `isActive: Bool`, `isHidden: Bool`, `launchDate: Date?`.
-- `WorkspaceMonitor`: init(), start(onChange: @escaping @MainActor ([RunningAppSnapshot]) -> Void), stop(), snapshot() -> [RunningAppSnapshot]. 실행/종료/활성/숨김/wake 이벤트 기반.
-- `ApplicationResolver`: init(), resolve(url: URL) throws -> AppEntry, refresh(AppEntry) -> AppEntry? (bookmark 복원).
-- `ApplicationLauncher`: init(), open(AppEntry) async throws, hide(AppEntry), unhide(AppEntry), quit(AppEntry) -> Bool, reveal(AppEntry). 동일 앱 실행 요청 합치기.
-- `IconRepository`: init(), image(for: AppEntry) -> NSImage, invalidate(). 캐시 비용 제한.
-- `LoginItemService`: init(), isEnabled: Bool, statusDescription: String, setEnabled(Bool) throws.
+- `WorkspaceMonitor`: `init()`, `start(onChange: @escaping @MainActor ([RunningAppSnapshot]) -> Void)`, `stop()`, `snapshot() -> [RunningAppSnapshot]`. 실행/종료/활성/숨김/wake 이벤트 기반.
+- `ApplicationResolver`: `init()`, `resolve(url: URL) throws -> AppEntry`, `refresh(AppEntry) -> AppEntry?` (bookmark 복원).
+- `ApplicationLauncher`: `init()`, `open(AppEntry) async throws`, `hide(AppEntry)`, `unhide(AppEntry)`, `quit(AppEntry) -> Bool`, `reveal(AppEntry)`. 동일 앱 실행 요청 합치기.
+- `IconRepository`: `init()`, `image(for: AppEntry) -> NSImage`, `invalidate()`. 캐시 비용 제한.
+- `LoginItemService`: `init()`, `isEnabled: Bool`, `statusDescription: String`, `setEnabled(Bool) throws`.
 
 ## MenuBarDock
 
