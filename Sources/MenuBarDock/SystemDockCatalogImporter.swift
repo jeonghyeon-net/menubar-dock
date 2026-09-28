@@ -18,7 +18,7 @@ enum SystemDockCatalogImporter {
             guard var app = try? resolve(url) else { continue }
             let path = canonicalPath(app.bundlePath)
             if !observedPaths.contains(path) { observedPaths.append(path) }
-            guard !catalog.isRemoved(app) else { continue }
+            guard !catalog.isAutomaticPinningSuppressed(app) else { continue }
             let existing = catalog.orderedApps.first {
                 canonicalPath($0.bundlePath) == path && compatibleIdentity($0, app)
             }
@@ -31,7 +31,7 @@ enum SystemDockCatalogImporter {
                     catalog.refreshRemovedApp(refreshed)
                 }
             }
-            guard !catalog.isRemoved(app) else { continue }
+            guard !catalog.isAutomaticPinningSuppressed(app) else { continue }
             if let existing { app.id = existing.id }
             let wasExcluded = existing?.isExcluded ?? false
             catalog.upsert(app)

@@ -8,7 +8,7 @@ enum ApplicationMenu {
         let application = submenu("Menu Bar Dock", in: bar)
         item("Menu Bar Dock 정보", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), in: application)
         application.addItem(.separator())
-        let settings = item("설정…", action: #selector(AppDelegate.openSettings(_:)), key: ",", in: application)
+        let settings = item("설정", action: #selector(AppDelegate.openSettings(_:)), key: ",", in: application)
         settings.target = delegate
         let switcher = item("앱 선택기 열기", action: #selector(AppDelegate.openSwitcher(_:)), in: application)
         switcher.target = delegate
@@ -18,7 +18,7 @@ enum ApplicationMenu {
         hideOthers.keyEquivalentModifierMask = [.command, .option]
         item("모두 보기", action: #selector(NSApplication.unhideAllApplications(_:)), in: application)
         application.addItem(.separator())
-        item("Menu Bar Dock 종료", action: #selector(NSApplication.terminate(_:)), key: "q", in: application)
+        item("종료", action: #selector(NSApplication.terminate(_:)), key: "q", in: application)
 
         let edit = submenu("편집", in: bar)
         item("실행 취소", action: Selector(("undo:")), key: "z", in: edit)

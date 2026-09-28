@@ -48,6 +48,7 @@ public struct DockConfiguration: Codable, Equatable, Sendable {
     public var apps: [AppEntry]
     public var order: [AppID]
     public var preferences: DockPreferences
+    /// 이전 저장 이름을 유지한다. 현재 의미는 실행 숨김이 아닌 Dock 자동 등록 억제 기록이다.
     public var removedApps: [AppEntry]
     public var knownSystemDockPaths: [String]
 
@@ -72,9 +73,13 @@ public struct DockConfiguration: Codable, Equatable, Sendable {
         let removedEntries = copy.removedApps
         var knownIDs = Set<AppID>()
         copy.apps = apps.filter { app in
-            !app.id.rawValue.isEmpty && !removedIDs.contains(app.id)
-                && !removedEntries.contains(where: { sameInstallation($0, app) })
-                && knownIDs.insert(app.id).inserted
+            !app.id.rawValue.isEmpty && knownIDs.insert(app.id).inserted
+        }.map { app in
+            var observed = app
+            if removedEntries.contains(where: { $0.id == app.id || sameInstallation($0, app) }) {
+                observed.isPinned = false
+            }
+            return observed
         }
         var orderedIDs = Set<AppID>()
         copy.order = order.filter { knownIDs.contains($0) && orderedIDs.insert($0).inserted }

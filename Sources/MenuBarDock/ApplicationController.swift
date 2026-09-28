@@ -66,11 +66,15 @@ final class ApplicationController {
         }
         guard !Task.isCancelled else { return }
         // 이동한 앱은 bookmark로 복구하되 사용자 ID와 순서를 유지한다.
+        var refreshedByID: [AppID: AppEntry] = [:]
         for app in catalog.orderedApps {
-            if let refreshed = resolver.refresh(app) { catalog.upsert(refreshed) }
+            if let refreshed = resolver.refresh(app) {
+                refreshedByID[app.id] = refreshed
+                catalog.upsert(refreshed)
+            }
         }
         for app in catalog.configuration.removedApps {
-            if let refreshed = resolver.refresh(app) { catalog.refreshRemovedApp(refreshed) }
+            if let refreshed = refreshedByID[app.id] ?? resolver.refresh(app) { catalog.refreshRemovedApp(refreshed) }
         }
         do { try systemDockMonitor?.start { [weak self] in self?.synchronizeSystemDock() } }
         catch { presentation.notice = "Dock 변경 감지를 시작하지 못했습니다. 앱을 다시 실행해 주세요." }
@@ -272,7 +276,9 @@ final class ApplicationController {
                     let app = try self.resolver.resolve(url: url)
                     // 등록 검증을 마친 값만 반영해 충돌 실패가 기존 목록을 일부 변경하지 않게 한다.
                     var registered = self.catalog
-                    try SavedAppRegistrar.register(app, replacing: id, in: &registered)
+                    try SavedAppRegistrar.register(
+                        app, replacing: id, in: &registered, refresh: { self.resolver.refresh($0) }
+                    )
                     self.icons.invalidate()
                     self.mutate { $0 = registered }
                 } catch { self.report(error) }

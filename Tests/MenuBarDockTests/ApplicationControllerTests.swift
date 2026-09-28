@@ -56,7 +56,8 @@ struct ApplicationControllerTests {
         savedOnly.showsRunningApps = true
         model.perform(.preferences(savedOnly))
         #expect(model.apps.map(\.id) == [last.id, first.id])
-        #expect(!model.items.contains { $0.id == temporary.id })
+        #expect(model.items.contains { $0.id == temporary.id && $0.isRunning && !$0.app.isPinned })
+        #expect(model.items.suffix(2).map(\.id) == [last.id, first.id])
     }
 
     @Test func separateSearchResultsCanOpenWhileAnotherLaunchIsPending() async {
@@ -84,8 +85,8 @@ struct ApplicationControllerTests {
         controller.stop()
     }
 
-    @Test("실행 중인 앱도 삭제 명령을 받으면 설정 행과 선택 목록에서 제거된다")
-    func removingRunningApplicationActuallyRemovesItsRow() async throws {
+    @Test("실행 중인 앱을 목록에서 제거하면 설정 행만 사라지고 앞쪽 임시 앱으로 남는다")
+    func removingRunningApplicationKeepsItsTemporaryItem() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         // 외부 앱을 실행·종료하지 않고 현재 OS의 실행 스냅샷과 동일 설치를 사용한다.
@@ -107,7 +108,10 @@ struct ApplicationControllerTests {
         #expect(controller.presentation.items.contains { $0.id == app.id && $0.isRunning })
         controller.presentation.perform(.remove(app.id))
         #expect(!controller.presentation.apps.contains { $0.id == app.id })
-        #expect(!controller.presentation.items.contains { $0.id == app.id })
+        #expect(controller.presentation.items.contains { $0.id == app.id && $0.isRunning && !$0.app.isPinned })
+        controller.presentation.perform(.save(app.id))
+        #expect(controller.presentation.apps.map(\.id) == [app.id])
+        #expect(controller.presentation.items.filter { $0.id == app.id }.count == 1)
     }
 
     @Test func preferenceChangesOnlyPublishValuesThatActuallyChanged() async throws {

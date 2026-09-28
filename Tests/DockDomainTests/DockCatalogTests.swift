@@ -25,8 +25,8 @@ struct DockCatalogTests {
         let runningIDs: Set<AppID> = [first.id, temporary.id, hidden.id, anotherTemporary.id, removed.id]
         #expect(catalog.savedApps == [first, second])
         let visible = catalog.visibleItems(runningIDs: runningIDs)
-        #expect(visible.map(\.id) == [temporary.id, anotherTemporary.id, first.id, second.id])
-        #expect(visible.map(\.isRunning) == [true, true, true, false])
+        #expect(visible.map(\.id) == [temporary.id, anotherTemporary.id, removed.id, first.id, second.id])
+        #expect(visible.map(\.isRunning) == [true, true, true, true, false])
         #expect(Set(visible.map(\.id)).count == visible.count)
         #expect(catalog.visibleItems(runningIDs: []).map(\.id) == [first.id, second.id])
         #expect(catalog.configuration.order == originalOrder)
@@ -58,22 +58,16 @@ struct DockCatalogTests {
         #expect(catalog.savedApps.map(\.id) == [first.id, temporary.id, hidden.id, last.id])
     }
 
-    @Test("삭제된 앱은 저장 명령만으로 복원되지 않고 명시적 재추가 후 기존 ID로 끝에 등록된다")
-    func removedAppRequiresExplicitRestorationBeforeSaving() throws {
+    @Test("목록 제거 후 실행 관찰은 임시 앱으로 남고 저장하면 같은 ID로 목록 끝에 등록된다")
+    func removedAppCanBeSavedAgainWithoutChangingIdentity() {
         let removed = entry("removed", pinned: true)
         let retained = entry("retained", pinned: true)
         var catalog = DockCatalog(configuration: DockConfiguration(apps: [removed, retained]))
         catalog.remove(removed.id)
-        catalog.save(removed.id)
         catalog.upsert(removed)
         #expect(catalog.savedApps == [retained])
-        var added = removed
-        added.id = AppID(rawValue: "resolved-again")
-        added.isPinned = false
-        let restoredID = catalog.upsertRestoring(added)
-        let id = try #require(restoredID)
-        catalog.save(id)
-        #expect(id == removed.id)
+        #expect(catalog.visibleItems(runningIDs: [removed.id]).map(\.id) == [removed.id, retained.id])
+        catalog.save(removed.id)
         #expect(catalog.savedApps.map(\.id) == [retained.id, removed.id])
         #expect(catalog.configuration.removedApps.isEmpty)
     }
@@ -118,23 +112,30 @@ struct DockCatalogTests {
         }
     }
 
-    @Test("삭제한 앱은 목록에서 사라지고 반복 관찰과 이력 정리로 복원되지 않는다")
-    func removalSuppressesRediscoveryAndSurvivesPruning() {
+    @Test("목록 제거는 실행 중 임시 표시를 허용하고 이력 정리 뒤에도 자동 고정 억제를 유지한다")
+    func removalOnlySuppressesPinningAndSurvivesPruning() {
         let before = entry("before", pinned: true)
         let removed = entry("removed", pinned: true)
         let after = entry("after", pinned: true)
         var catalog = DockCatalog(configuration: DockConfiguration(apps: [before, removed, after]))
         catalog.remove(removed.id)
-        #expect(catalog.configuration.apps == [before, after])
-        #expect(catalog.configuration.order == [before.id, after.id])
+        #expect(catalog.savedApps == [before, after])
+        #expect(catalog.configuration.order == [before.id, removed.id, after.id])
         #expect(catalog.configuration.removedApps == [removed])
         var observed = removed
         observed.id = AppID(rawValue: "new-observation-id")
         for _ in 0..<3 { catalog.upsert(observed) }
+        #expect(catalog.orderedApps.count == 3)
+        #expect(catalog.visibleItems(runningIDs: [removed.id]).map(\.id) == [removed.id, before.id, after.id])
+        #expect(catalog.visibleItems(runningIDs: []).map(\.id) == [before.id, after.id])
         catalog.pruneHistory(runningIDs: [], now: Date.distantFuture, maximumEntries: 0)
         #expect(catalog.orderedApps == [before, after])
-        #expect(catalog.isRemoved(observed))
+        #expect(catalog.isAutomaticPinningSuppressed(observed))
         #expect(catalog.configuration.removedApps == [removed])
+        catalog.upsert(observed)
+        #expect(catalog.configuration.order == [before.id, after.id, removed.id])
+        #expect(catalog.savedApps == [before, after])
+        #expect(catalog.visibleItems(runningIDs: [removed.id]).map(\.id) == [removed.id, before.id, after.id])
     }
 
     @Test("명시적 재추가는 삭제 기록의 ID를 재사용해 끝에 복원하고 이후 중복을 만들지 않는다")
@@ -147,6 +148,7 @@ struct DockCatalogTests {
         added.id = AppID(rawValue: "resolver-id")
         let restoration = catalog.upsertRestoring(added)
         let restoredID = try #require(restoration)
+        catalog.save(restoredID)
         #expect(restoredID == removed.id)
         #expect(catalog.configuration.removedApps.isEmpty)
         #expect(catalog.configuration.order == [other.id, removed.id])
@@ -156,7 +158,7 @@ struct DockCatalogTests {
         #expect(catalog.configuration.order == [other.id, removed.id])
     }
 
-    @Test("삭제된 앱의 이동 경로도 억제하되 별도 설치와 교체된 앱은 허용한다")
+    @Test("등록 해제한 앱이 이동해도 임시 ID를 유지하고 별도 설치와 교체 앱은 구분한다")
     func removalTracksMovedInstallationWithoutBlockingOtherApps() {
         var original = entry("removed")
         original.bundleIdentifier = "test.editor"
@@ -169,7 +171,9 @@ struct DockCatalogTests {
         var observed = moved
         observed.id = AppID(rawValue: "observed")
         catalog.upsert(observed)
-        #expect(catalog.orderedApps.isEmpty)
+        #expect(catalog.orderedApps.map(\.id) == [original.id])
+        #expect(catalog.orderedApps.first?.bundlePath == moved.bundlePath)
+        #expect(catalog.savedApps.isEmpty)
         #expect(catalog.configuration.removedApps.first?.bookmarkData == moved.bookmarkData)
         var secondInstallation = original
         secondInstallation.id = AppID(rawValue: "separate-installation")
@@ -178,7 +182,7 @@ struct DockCatalogTests {
         replacement.id = AppID(rawValue: "replacement")
         replacement.bundleIdentifier = "test.other-app"
         catalog.upsert(replacement)
-        #expect(catalog.orderedApps.map(\.id) == [secondInstallation.id, replacement.id])
+        #expect(catalog.orderedApps.map(\.id) == [original.id, secondInstallation.id, replacement.id])
     }
 
     @Test("내부 중복 정리는 삭제 기록을 만들지 않고 제외는 목록에 남는다")
@@ -187,12 +191,12 @@ struct DockCatalogTests {
         var duplicate = retained
         duplicate.id = AppID(rawValue: "duplicate")
         var catalog = DockCatalog(configuration: DockConfiguration(apps: [retained, duplicate]))
-        catalog.remove(duplicate.id, suppressRediscovery: false)
+        catalog.discard(duplicate.id)
         #expect(catalog.configuration.removedApps.isEmpty)
         catalog.exclude(retained.id, true)
         #expect(catalog.orderedApps.map(\.id) == [retained.id])
         #expect(catalog.visibleItems(runningIDs: [retained.id]).isEmpty)
-        #expect(!catalog.isRemoved(retained))
+        #expect(!catalog.isAutomaticPinningSuppressed(retained))
         catalog.exclude(retained.id, false)
         #expect(catalog.visibleItems(runningIDs: []).map(\.id) == [retained.id])
     }
@@ -206,9 +210,9 @@ struct DockCatalogTests {
         #expect(catalog.configuration.knownSystemDockPaths == ["/Applications/B.app"])
     }
 
-    @Test("삭제 기록과 살아 있는 중복이 함께 저장돼도 삭제가 우선하며 다른 순서를 유지한다")
-    func normalizationHonorsRemovalOverStaleLiveEntries() {
-        let removed = entry("removed")
+    @Test("자동 고정 억제 기록과 실행 항목을 함께 저장해도 항목과 순서를 잃지 않는다")
+    func normalizationRetainsUnpinnedLiveEntriesWithSuppressionRecords() {
+        let removed = entry("removed", pinned: true)
         let first = entry("first", pinned: true)
         let last = entry("last", pinned: true)
         var observed = removed
@@ -218,8 +222,9 @@ struct DockCatalogTests {
             order: [last.id, observed.id, removed.id, first.id],
             removedApps: [removed, removed]
         ).normalized()
-        #expect(normalized.apps == [first, last])
-        #expect(normalized.order == [last.id, first.id])
+        #expect(normalized.apps.map(\.id) == [first.id, removed.id, observed.id, last.id])
+        #expect(normalized.apps.filter { $0.id == removed.id || $0.id == observed.id }.allSatisfy { !$0.isPinned })
+        #expect(normalized.order == [last.id, observed.id, removed.id, first.id])
         #expect(normalized.removedApps == [removed])
         #expect(normalized.normalized() == normalized)
     }

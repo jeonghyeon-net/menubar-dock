@@ -36,13 +36,15 @@ struct WorkspaceCatalogReconciler {
         refresh: (AppEntry) -> AppEntry?
     ) {
         mergeDuplicateInstallations(in: &catalog)
-        let knownApps = catalog.orderedApps
+        let liveApps = catalog.orderedApps
+        let liveIDs = Set(liveApps.map(\.id))
+        var observedIDs = liveIDs
+        let knownApps = liveApps + catalog.configuration.removedApps.filter { !liveIDs.contains($0.id) }
         var byPath = Dictionary(
             knownApps.map { (canonicalPath($0.bundlePath), $0) },
             uniquingKeysWith: { first, _ in first }
         )
         let originalPaths = Dictionary(uniqueKeysWithValues: knownApps.map { ($0.id, canonicalPath($0.bundlePath)) })
-        var removedByPath = Dictionary(grouping: catalog.configuration.removedApps) { canonicalPath($0.bundlePath) }
         var refreshedByPath: [String: AppEntry]?
         let applications = snapshots.filter {
             $0.isRegular && $0.processIdentifier != ownProcessIdentifier
@@ -51,11 +53,12 @@ struct WorkspaceCatalogReconciler {
         for snapshot in applications {
             guard let url = snapshot.bundleURL, url.isFileURL else { continue }
             let path = canonicalPath(url.path)
-            if removedByPath[path]?.contains(where: { matchesIdentity($0, snapshot: snapshot) }) == true { continue }
             if var existing = byPath[path], matchesIdentity(existing, snapshot: snapshot) {
-                if now.timeIntervalSince(existing.lastSeen) > 3600 {
+                if !observedIDs.contains(existing.id) || now.timeIntervalSince(existing.lastSeen) > 3600 {
                     existing.lastSeen = now
-                    catalog.upsert(existing)
+                    guard let retainedID = catalog.upsert(existing) else { continue }
+                    existing.id = retainedID
+                    observedIDs.insert(retainedID)
                     byPath[path] = existing
                 }
                 continue
@@ -63,19 +66,14 @@ struct WorkspaceCatalogReconciler {
 
             // 여러 프로세스가 한꺼번에 생겨도 bookmark 복원을 항목당 한 번만 수행한다.
             if refreshedByPath == nil {
-                // 삭제한 앱도 이동할 수 있다. 모르는 경로가 생긴 배치에서만 삭제 기록을 함께 갱신한다.
-                for removed in catalog.configuration.removedApps {
-                    guard var refreshed = refresh(removed) else { continue }
-                    refreshed.id = removed.id
-                    catalog.refreshRemovedApp(refreshed)
-                }
-                removedByPath = Dictionary(grouping: catalog.configuration.removedApps) { canonicalPath($0.bundlePath) }
-                refreshedByPath = refreshedLocations(for: catalog.orderedApps, refresh: refresh)
+                // 실행 관찰과 자동 등록 억제가 공유하는 bookmark도 배치당 한 번만 복원한다.
+                refreshedByPath = refreshedLocations(for: knownApps, catalog: &catalog, refresh: refresh)
             }
-            if removedByPath[path]?.contains(where: { matchesIdentity($0, snapshot: snapshot) }) == true { continue }
             if var existing = refreshedByPath?[path], matchesIdentity(existing, snapshot: snapshot) {
                 existing.lastSeen = max(now, existing.lastSeen)
-                catalog.upsert(existing)
+                guard let retainedID = catalog.upsert(existing) else { continue }
+                existing.id = retainedID
+                observedIDs.insert(retainedID)
                 if let oldPath = originalPaths[existing.id], byPath[oldPath]?.id == existing.id {
                     byPath.removeValue(forKey: oldPath)
                 }
@@ -86,7 +84,9 @@ struct WorkspaceCatalogReconciler {
             do {
                 var app = try resolve(url)
                 app.lastSeen = now
-                catalog.upsert(app)
+                guard let retainedID = catalog.upsert(app) else { continue }
+                app.id = retainedID
+                observedIDs.insert(retainedID)
                 byPath[path] = app
             } catch {
                 // 종료 중이거나 읽을 수 없는 앱 하나 때문에 나머지 관찰 결과를 버리지 않는다.
@@ -125,7 +125,7 @@ struct WorkspaceCatalogReconciler {
             catalog.pin(retained.id, pinned)
             // pin(true)는 제외를 해제하므로 명시적 제외 정책은 병합의 마지막에 복원한다.
             catalog.exclude(retained.id, excluded)
-            catalog.remove(app.id, suppressRediscovery: false)
+            catalog.discard(app.id)
             retained.isPinned = pinned
             retained.isExcluded = excluded
             retainedByInstallation[identity] = retained
@@ -133,7 +133,7 @@ struct WorkspaceCatalogReconciler {
     }
 
     private static func refreshedLocations(
-        for knownApps: [AppEntry], refresh: (AppEntry) -> AppEntry?
+        for knownApps: [AppEntry], catalog: inout DockCatalog, refresh: (AppEntry) -> AppEntry?
     ) -> [String: AppEntry] {
         var result: [String: AppEntry] = [:]
         for original in knownApps {
@@ -143,6 +143,7 @@ struct WorkspaceCatalogReconciler {
             refreshed.isPinned = original.isPinned
             refreshed.isExcluded = original.isExcluded
             refreshed.lastSeen = max(original.lastSeen, refreshed.lastSeen)
+            catalog.refreshRemovedApp(refreshed)
             let path = canonicalPath(refreshed.bundlePath)
             if result[path] == nil { result[path] = refreshed }
         }

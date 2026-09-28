@@ -52,7 +52,7 @@ struct ConfigurationRepositoryTests {
         #expect(result.warning != nil)
     }
 
-    @Test("삭제 기록과 알려진 Dock 경로는 재시작 후에도 유지되며 명시적 추가만 복원한다")
+    @Test("등록 해제한 임시 앱과 자동 고정 억제는 재시작 후 유지되고 명시적 저장으로 해제된다")
     func removedAppsAndKnownDockPathsSurviveRoundTrip() async throws {
         let fixture = try RepositoryFixture()
         defer { fixture.cleanUp() }
@@ -64,8 +64,9 @@ struct ConfigurationRepositoryTests {
         try await fixture.repository.save(catalog.configuration, revision: 1)
         let loaded = try await ConfigurationRepository(directory: fixture.directory).load()
         #expect(loaded.warning == nil)
-        #expect(loaded.configuration.apps.isEmpty)
-        #expect(loaded.configuration.order.isEmpty)
+        #expect(loaded.configuration.apps.map(\.id) == [app.id])
+        #expect(loaded.configuration.apps.first?.isPinned == false)
+        #expect(loaded.configuration.order == [app.id])
         #expect(loaded.configuration.removedApps == [app])
         #expect(loaded.configuration.knownSystemDockPaths == [app.bundlePath])
 
@@ -73,13 +74,50 @@ struct ConfigurationRepositoryTests {
         var observed = app
         observed.id = AppID(rawValue: "new-process-resolver-id")
         reopened.upsert(observed)
-        #expect(reopened.orderedApps.isEmpty)
+        #expect(reopened.orderedApps.map(\.id) == [app.id])
+        #expect(reopened.savedApps.isEmpty)
+        #expect(reopened.visibleItems(runningIDs: [app.id]).map(\.id) == [app.id])
         let restoredID = reopened.upsertRestoring(observed)
         #expect(restoredID == app.id)
+        reopened.save(app.id)
         try await fixture.repository.save(reopened.configuration, revision: 2)
         let restored = try await ConfigurationRepository(directory: fixture.directory).load().configuration
         #expect(restored.order == [app.id])
         #expect(restored.removedApps.isEmpty)
+        #expect(restored.apps.first?.isPinned == true)
+    }
+
+    @Test("이전 삭제 전용 기록은 경고 없이 읽고 실행 관찰 시 원래 ID의 임시 앱으로 복원한다")
+    func legacyRemovalRecordsAllowRunningDiscoveryWithoutChangingSavedSettings() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        let retained = try #require(configuration("항상 표시").apps.first)
+        var old = retained
+        old.id = AppID(rawValue: "legacy-removed")
+        old.bundlePath = "/Applications/Removed.app"
+        old.isExcluded = true
+        let original = DockConfiguration(
+            apps: [retained], order: [retained.id], preferences: DockPreferences(iconSize: 20, slotWidth: 25),
+            removedApps: [old], knownSystemDockPaths: [retained.bundlePath, old.bundlePath]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        try encoder.encode(original).write(to: fixture.primary)
+        let loaded = try await fixture.repository.load()
+        #expect(loaded.warning == nil)
+        #expect(loaded.configuration == original)
+        var catalog = DockCatalog(configuration: loaded.configuration)
+        var observed = old
+        observed.id = AppID(rawValue: "fresh-resolver-id")
+        catalog.upsert(observed)
+        #expect(catalog.savedApps == [retained])
+        #expect(catalog.visibleItems(runningIDs: [old.id]).map(\.id) == [old.id, retained.id])
+        try await fixture.repository.save(catalog.configuration, revision: 1)
+        let reopened = try await ConfigurationRepository(directory: fixture.directory).load()
+        #expect(reopened.warning == nil)
+        #expect(reopened.configuration == catalog.configuration)
+        #expect(reopened.configuration.preferences == original.preferences)
+        #expect(reopened.configuration.knownSystemDockPaths == original.knownSystemDockPaths)
     }
 
     @Test("이전 일회성 Dock 가져오기 표시는 알려진 앱 경로로 변환하고 다시 저장하지 않는다")

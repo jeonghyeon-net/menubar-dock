@@ -9,8 +9,8 @@ import Testing
 struct WorkspaceCatalogReconcilerTests {
     private let now = Date(timeIntervalSince1970: 100_000)
 
-    @Test("실행 중 이동한 삭제 앱은 새 경로에서도 억제하고 새 경로 배치에서만 bookmark를 조회한다")
-    func movedRemovedApplicationIsNotRediscoveredAndRefreshIsBounded() throws {
+    @Test("등록 해제한 실행 앱의 이동은 임시 ID와 억제 기록을 보존하고 bookmark는 한 번만 조회한다")
+    func movedUnpinnedApplicationKeepsTemporaryIdentityAndRefreshIsBounded() throws {
         let removed = app("removed", path: "/Applications/Before.app")
         let anotherRemoved = app("another-removed", path: "/Applications/Hidden.app")
         let retained = app("retained", path: "/Applications/Retained.app")
@@ -38,31 +38,63 @@ struct WorkspaceCatalogReconcilerTests {
                 }
             )
         }
-        #expect(catalog.orderedApps.map(\.id) == [retained.id, added.id])
+        #expect(catalog.orderedApps.map(\.id) == [removed.id, retained.id, anotherRemoved.id, added.id])
+        let running = WorkspaceCatalogReconciler.runningIDs(catalog: catalog, snapshots: snapshots)
+        #expect(catalog.visibleItems(runningIDs: running).map(\.id) == [removed.id, retained.id, added.id])
+        #expect(catalog.savedApps.isEmpty)
         #expect(resolvedPaths == [added.bundlePath])
         #expect(refreshCounts == [removed.id: 1, anotherRemoved.id: 1, retained.id: 1])
         let preserved = try #require(catalog.configuration.removedApps.first { $0.id == removed.id })
         #expect(preserved.bundlePath == moved.bundlePath)
         #expect(preserved.bookmarkData == moved.bookmarkData)
-        #expect(catalog.isRemoved(moved))
+        #expect(catalog.isAutomaticPinningSuppressed(moved))
     }
 
-    @Test("삭제한 실행 앱은 반복 관찰·종료·재실행 이후에도 목록에 다시 추가되지 않는다")
-    func removedRunningApplicationStaysRemoved() {
-        let removed = app("removed", path: "/Applications/Removed.app")
-        let other = app("other", path: "/Applications/Other.app")
-        var catalog = DockCatalog(configuration: DockConfiguration(apps: [removed, other]))
-        catalog.remove(removed.id)
-        for observed in [[snapshot(removed), snapshot(other)], [], [snapshot(removed, pid: 20)]] {
-            WorkspaceCatalogReconciler.reconcile(
-                catalog: &catalog, snapshots: observed, ownProcessIdentifier: 999, now: now,
-                resolve: { $0.path == removed.bundlePath ? removed : other }, refresh: { $0 }
-            )
-            #expect(catalog.orderedApps.map(\.id) == [other.id])
+    @Test("이전 삭제 기록 여러 개를 임시 앱으로 복원하며 종료·재실행과 명시적 재등록을 구분한다")
+    func legacyRemovedApplicationsReturnOnlyWhileRunning() {
+        var first = app("saved-first", path: "/Applications/First.app")
+        first.isPinned = true
+        var last = app("saved-last", path: "/Applications/Last.app")
+        last.isPinned = true
+        var removed = (0..<3).map { index in
+            var entry = app("removed-\(index)", path: "/Applications/Removed\(index).app")
+            entry.isPinned = true
+            return entry
         }
-        let restored = catalog.upsertRestoring(removed)
-        #expect(restored == removed.id)
-        #expect(catalog.orderedApps.map(\.id) == [other.id, removed.id])
+        removed[1].bundleIdentifier = removed[0].bundleIdentifier
+        removed[2].isExcluded = true
+        var catalog = DockCatalog(configuration: DockConfiguration(
+            apps: [first, last], order: [last.id, first.id], removedApps: removed
+        ))
+        let observed = removed.enumerated().map { snapshot($0.element, pid: Int32($0.offset + 1)) }
+            + [snapshot(removed[0], pid: 10)]
+        var resolutions = 0
+        var refreshes = 0
+        func update(_ snapshots: [RunningAppSnapshot]) -> [AppID] {
+            WorkspaceCatalogReconciler.reconcile(
+                catalog: &catalog, snapshots: snapshots, ownProcessIdentifier: 999, now: now,
+                resolve: { _ in resolutions += 1; return removed[0] },
+                refresh: { refreshes += 1; return $0 }
+            )
+            return catalog.visibleItems(runningIDs: WorkspaceCatalogReconciler.runningIDs(catalog: catalog, snapshots: snapshots)).map(\.id)
+        }
+        let savedIDs = [last.id, first.id]
+        let expected = removed.map(\.id) + savedIDs
+        #expect(update(observed) == expected)
+        #expect(update(observed) == expected)
+        #expect(catalog.savedApps.map(\.id) == savedIDs)
+        #expect(catalog.orderedApps.count == 5)
+        #expect(update([]) == savedIDs)
+        catalog.pruneHistory(runningIDs: [], now: .distantFuture, maximumEntries: 0)
+        #expect(catalog.orderedApps.count == 2)
+        #expect(update(observed) == expected)
+        #expect(catalog.savedApps.map(\.id) == savedIDs)
+        #expect(resolutions == 0)
+        #expect(refreshes == 0)
+        catalog.save(removed[1].id)
+        #expect(catalog.savedApps.map(\.id) == savedIDs + [removed[1].id])
+        #expect(!catalog.isAutomaticPinningSuppressed(removed[1]))
+        #expect(catalog.configuration.removedApps.map(\.id) == [removed[0].id, removed[2].id])
     }
 
     @Test("동일 경로가 다른 앱으로 대체되면 새 설치만 실행 중·현재 앱으로 연결한다")
@@ -139,6 +171,28 @@ struct WorkspaceCatalogReconcilerTests {
         }
         #expect(catalog.orderedApps.map(\.id) == [observed.id])
         #expect(resolveCount == 1)
+    }
+
+    @Test("같은 경로의 교체 앱을 재해석해도 실제 유지 ID로 캐시하여 중복 프로세스를 합친다")
+    func resolvedInstallationUsesRetainedIdentityWithinTheSnapshotBatch() {
+        let replaced = app("replaced", path: "/Applications/Shared.app")
+        let retained = app("retained", path: replaced.bundlePath)
+        let added = app("added", path: "/Applications/Added.app")
+        var resolved = retained
+        resolved.id = AppID(rawValue: "fresh-resolver-id")
+        var catalog = DockCatalog(configuration: DockConfiguration(apps: [replaced, retained]))
+        var resolvedPaths: [String] = []
+        let snapshots = [snapshot(retained, pid: 1), snapshot(retained, pid: 2), snapshot(added, pid: 3)]
+        WorkspaceCatalogReconciler.reconcile(
+            catalog: &catalog, snapshots: snapshots, ownProcessIdentifier: 999, now: now,
+            resolve: { url in
+                resolvedPaths.append(url.path)
+                return url.path == added.bundlePath ? added : resolved
+            }, refresh: { $0 }
+        )
+        #expect(resolvedPaths == [added.bundlePath, retained.bundlePath])
+        #expect(catalog.orderedApps.map(\.id) == [replaced.id, retained.id, added.id])
+        #expect(WorkspaceCatalogReconciler.runningIDs(catalog: catalog, snapshots: snapshots) == [retained.id, added.id])
     }
 
     @Test("bundle identifier가 같은 별도 설치 경로는 합치지 않는다")

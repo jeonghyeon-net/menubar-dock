@@ -29,9 +29,12 @@ extension NativeUIBehaviorTests {
         let buttonAction = try #require(button.action)
         #expect(button.sendAction(buttonAction, to: button.target))
         let presented = try #require(menu)
+        let commandTitle = saved ? "목록에서 제거" : "목록에 추가"
+        #expect(presented.items.map(\.title) == [commandTitle, "설정", "종료"])
+        #expect(presented.items.allSatisfy { !$0.isSeparatorItem && $0.keyEquivalent.isEmpty })
         #expect(presented.item(withTitle: "고정") == nil)
         #expect(presented.item(withTitle: "목록에서 숨기기") == nil)
-        let command = try #require(presented.item(withTitle: saved ? "목록에서 제거" : "목록에 추가"))
+        let command = try #require(presented.item(withTitle: commandTitle))
         let commandAction = try #require(command.action)
         #expect(command.state == .off)
         #expect(NSApp.sendAction(commandAction, to: command.target, from: command))

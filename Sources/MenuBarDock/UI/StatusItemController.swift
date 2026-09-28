@@ -6,6 +6,7 @@ import DockDomain
 @MainActor
 final class StatusItemController: NSObject {
     private final class Slot {
+        // 삭제 뒤 다른 번호가 남을 수 있다. 배열 위치가 아닌 재사용 가능한 고유 번호다.
         let number: Int
         let item: NSStatusItem
         var appID: AppID?
@@ -28,6 +29,7 @@ final class StatusItemController: NSObject {
     private let removeStatusItem: (NSStatusItem) -> Void
     private let currentEvent: () -> NSEvent?
     private let presentMenu: (NSMenu, NSStatusBarButton) -> Void
+    private let frameForStatusItem: (NSStatusItem) -> NSRect?
     private var slots: [Slot] = []
     private var subscriptions: Set<AnyCancellable> = []
     private var observations: [NSObjectProtocol] = []
@@ -40,12 +42,14 @@ final class StatusItemController: NSObject {
         makeStatusItem: ((CGFloat) -> NSStatusItem)? = nil,
         removeStatusItem: ((NSStatusItem) -> Void)? = nil,
         currentEvent: (() -> NSEvent?)? = nil,
-        menuPresenter: ((NSMenu, NSStatusBarButton) -> Void)? = nil
+        menuPresenter: ((NSMenu, NSStatusBarButton) -> Void)? = nil,
+        frameForStatusItem: ((NSStatusItem) -> NSRect?)? = nil
     ) {
         self.model = model
         self.makeStatusItem = makeStatusItem ?? { NSStatusBar.system.statusItem(withLength: $0) }
         self.removeStatusItem = removeStatusItem ?? { NSStatusBar.system.removeStatusItem($0) }
         self.currentEvent = currentEvent ?? { NSApp.currentEvent }
+        self.frameForStatusItem = frameForStatusItem ?? Self.visibleFrame
         self.presentMenu = menuPresenter ?? { menu, button in
             button.highlight(true)
             defer { button.highlight(false) }
@@ -91,7 +95,7 @@ final class StatusItemController: NSObject {
         let iconSize = CGFloat(preferences.iconSize)
         let slotWidth = max(CGFloat(preferences.slotWidth), iconSize)
         let visible = Array(model.items.prefix(preferences.maxVisibleApps))
-        resizeSlots(to: visible.count, width: slotWidth)
+        resizeSlots(for: visible, width: slotWidth)
         for slot in slots where slot.item.length != slotWidth {
             slot.item.length = slotWidth
         }
@@ -115,16 +119,24 @@ final class StatusItemController: NSObject {
         }
     }
 
-    private func resizeSlots(to count: Int, width: CGFloat) {
+    private func resizeSlots(for visible: [DockItem], width: CGFloat) {
+        let count = visible.count
         if count < slots.count {
-            for slot in slots.filter({ $0.number >= count }) {
-                removeStatusItem(slot.item)
-            }
-            slots.removeAll { $0.number >= count }
+            let retainedIDs = Set(visible.map(\.id))
+            let ordered = orderedSlots().reversed()
+            let obsolete = ordered.filter { $0.appID.map { !retainedIDs.contains($0) } ?? true }
+            let retained = ordered.filter { $0.appID.map { retainedIDs.contains($0) } ?? false }
+            let removed = Array((obsolete + retained).prefix(slots.count - count))
+            let numbers = Set(removed.map(\.number))
+            // 지워질 앱의 슬롯을 직접 제거해 다른 앱의 창이 먼저 사라지는 재배치를 피한다.
+            slots.removeAll { numbers.contains($0.number) }
+            for slot in removed { removeStatusItem(slot.item) }
         }
         guard count > slots.count else { return }
+        let usedNumbers = Set(slots.map(\.number))
+        let available = (0..<count).filter { !usedNumbers.contains($0) }.prefix(count - slots.count)
         // 새 상태 항목은 왼쪽에 추가된다. 최초 생성 때 0번 슬롯이 왼쪽이 되도록 역순 생성한다.
-        for number in (slots.count..<count).reversed() {
+        for number in available.reversed() {
             let item = makeStatusItem(width)
             item.autosaveName = "MenuBarDock.AppSlot.\(number)"
             item.behavior = []
@@ -138,18 +150,15 @@ final class StatusItemController: NSObject {
                 button.postsFrameChangedNotifications = true
                 button.postsBoundsChangedNotifications = true
             }
-            slots.append(Slot(number: number, item: item))
+            slots.insert(Slot(number: number, item: item), at: 0)
         }
     }
 
     private func orderedSlots() -> [Slot] {
-        let fallback = slots.sorted { $0.number < $1.number }
+        // 재배치 중 좌표가 비면 번호순으로 되돌리지 않고 마지막 유효 좌우 순서를 유지한다.
+        let fallback = slots
         let positioned = fallback.compactMap { slot -> (Slot, NSRect)? in
-            guard let window = slot.item.button?.window, window.isVisible,
-                  window.frame.width > 0, window.frame.height > 0,
-                  let screen = window.screen,
-                  screen.frame.contains(NSPoint(x: window.frame.midX, y: window.frame.midY)) else { return nil }
-            return (slot, window.frame)
+            frameForStatusItem(slot.item).map { (slot, $0) }
         }
         // 초기 배치·숨겨진 메뉴 막대·노치에 가려진 항목은 유효 좌표가 없을 수 있다.
         // 모두 같은 메뉴 막대에 있을 때만 실제 좌우 위치를 사용한다.
@@ -157,7 +166,15 @@ final class StatusItemController: NSObject {
               let first = positioned.first?.1,
               positioned.allSatisfy({ abs($0.1.midY - first.midY) < 1 }),
               Set(positioned.map { $0.1.minX }).count == positioned.count else { return fallback }
-        return positioned.sorted { $0.1.minX < $1.1.minX }.map(\.0)
+        slots = positioned.sorted { $0.1.minX < $1.1.minX }.map(\.0)
+        return slots
+    }
+
+    private static func visibleFrame(_ item: NSStatusItem) -> NSRect? {
+        guard let window = item.button?.window, window.isVisible,
+              window.frame.width > 0, window.frame.height > 0, let screen = window.screen,
+              screen.frame.contains(NSPoint(x: window.frame.midX, y: window.frame.midY)) else { return nil }
+        return window.frame
     }
 
     @objc private func activate(_ sender: NSStatusBarButton) {
@@ -173,23 +190,21 @@ final class StatusItemController: NSObject {
     private func showMenu(for id: AppID, anchor: NSStatusBarButton) {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        append("설정…", action: .settings, to: menu, key: ",")
         if let app = model.items.first(where: { $0.id == id })?.app {
-            menu.addItem(.separator())
             if app.isPinned {
                 append("목록에서 제거", action: .remove(id), to: menu, enabled: !model.isReadOnly)
             } else {
                 append("목록에 추가", action: .save(id), to: menu, enabled: !model.isReadOnly)
             }
         }
-        menu.addItem(.separator())
-        append("Menu Bar Dock 종료", action: .quit, to: menu, key: "q")
+        append("설정", action: .settings, to: menu)
+        append("종료", action: .quit, to: menu)
         presentMenu(menu, anchor)
     }
 
     @discardableResult
-    private func append(_ title: String, action: DockUIAction, to menu: NSMenu, key: String = "", enabled: Bool = true) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: #selector(performMenuAction(_:)), keyEquivalent: key)
+    private func append(_ title: String, action: DockUIAction, to menu: NSMenu, enabled: Bool = true) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(performMenuAction(_:)), keyEquivalent: "")
         item.target = self
         item.representedObject = action
         item.isEnabled = enabled

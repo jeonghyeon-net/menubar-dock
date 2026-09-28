@@ -18,28 +18,44 @@ public struct DockCatalog: Sendable {
         orderedApps.filter { $0.isPinned && !$0.isExcluded }
     }
 
-    public mutating func upsert(_ app: AppEntry) {
-        guard !app.id.rawValue.isEmpty, !isRemoved(app) else { return }
-        if let index = configuration.apps.firstIndex(where: { $0.id == app.id }) {
+    @discardableResult
+    public mutating func upsert(_ app: AppEntry) -> AppID? {
+        guard !app.id.rawValue.isEmpty else { return nil }
+        let suppressed = configuration.removedApps.first { $0.id == app.id || sameInstallation($0, app) }
+        let existingIndex = configuration.apps.firstIndex(where: { $0.id == app.id })
+            ?? configuration.apps.firstIndex(where: { sameInstallation($0, app) })
+        if let index = existingIndex {
             var updated = app
             let previous = configuration.apps[index]
+            updated.id = previous.id
             // 관찰 이벤트가 고정·제외 정책과 마지막 확인 시간을 되돌리지 못하게 한다.
-            updated.isPinned = previous.isPinned
+            updated.isPinned = suppressed == nil && previous.isPinned
             updated.isExcluded = previous.isExcluded
             updated.lastSeen = max(previous.lastSeen, app.lastSeen)
             updated.bookmarkData = app.bookmarkData ?? previous.bookmarkData
             configuration.apps[index] = updated
+            return updated.id
         } else {
-            configuration.apps.append(app)
-            configuration.order.append(app.id)
+            var observed = app
+            if let suppressed {
+                // 이전 삭제 기록도 실행 관찰은 허용한다. 자동 등록만 막고 기존 설치 ID를 재사용한다.
+                observed.id = suppressed.id
+                observed.isPinned = false
+                observed.isExcluded = false
+                observed.bookmarkData = app.bookmarkData ?? suppressed.bookmarkData
+                observed.lastSeen = max(app.lastSeen, suppressed.lastSeen)
+            }
+            configuration.apps.append(observed)
+            configuration.order.append(observed.id)
+            return observed.id
         }
     }
 
-    public func isRemoved(_ app: AppEntry) -> Bool {
+    public func isAutomaticPinningSuppressed(_ app: AppEntry) -> Bool {
         configuration.removedApps.contains { $0.id == app.id || sameInstallation($0, app) }
     }
 
-    /// 명시적으로 추가한 설치만 삭제 기록에서 복원한다. 기존 ID를 재사용하고 복원 위치는 목록 끝이다.
+    /// 명시적으로 추가한 설치의 자동 등록 억제를 해제한다. 등록 위치는 save가 결정한다.
     @discardableResult
     public mutating func upsertRestoring(_ app: AppEntry) -> AppID? {
         guard !app.id.rawValue.isEmpty else { return nil }
@@ -54,11 +70,10 @@ public struct DockCatalog: Sendable {
         configuration.removedApps.removeAll {
             $0.id == restored.id || $0.id == app.id || sameInstallation($0, app)
         }
-        upsert(restored)
-        return restored.id
+        return upsert(restored)
     }
 
-    /// bookmark로 찾은 새 위치도 삭제 상태로 남겨 자동 관찰이 앱을 되살리지 않게 한다.
+    /// bookmark 이동을 관찰 항목과 자동 등록 억제 기록에 함께 반영한다.
     public mutating func refreshRemovedApp(_ app: AppEntry) {
         guard let index = configuration.removedApps.firstIndex(where: { $0.id == app.id }) else { return }
         let previous = configuration.removedApps[index]
@@ -68,15 +83,20 @@ public struct DockCatalog: Sendable {
         refreshed.bookmarkData = app.bookmarkData ?? previous.bookmarkData
         refreshed.lastSeen = max(app.lastSeen, previous.lastSeen)
         configuration.removedApps[index] = refreshed
-        let removedIDs = Set(configuration.apps.filter { isRemoved($0) }.map(\.id))
-        configuration.apps.removeAll { removedIDs.contains($0.id) }
-        configuration.order.removeAll { removedIDs.contains($0) }
+        for existing in configuration.apps where existing.id == previous.id || sameInstallation(existing, previous) {
+            var updated = refreshed
+            updated.id = existing.id
+            upsert(updated)
+        }
     }
 
     public mutating func pin(_ id: AppID, _ isPinned: Bool) {
         guard let index = configuration.apps.firstIndex(where: { $0.id == id }) else { return }
         configuration.apps[index].isPinned = isPinned
-        if isPinned { configuration.apps[index].isExcluded = false }
+        if isPinned {
+            configuration.apps[index].isExcluded = false
+            clearAutomaticPinningSuppression(for: configuration.apps[index])
+        }
     }
 
     /// 새 등록은 저장 목록 끝에 추가하고 이미 등록된 앱의 순서는 바꾸지 않는다.
@@ -85,6 +105,7 @@ public struct DockCatalog: Sendable {
         let wasSaved = configuration.apps[index].isPinned && !configuration.apps[index].isExcluded
         configuration.apps[index].isPinned = true
         configuration.apps[index].isExcluded = false
+        clearAutomaticPinningSuppression(for: configuration.apps[index])
         guard !wasSaved else { return }
         configuration.order.removeAll { $0 == id }
         configuration.order.append(id)
@@ -95,17 +116,25 @@ public struct DockCatalog: Sendable {
         configuration.apps[index].isExcluded = isExcluded
     }
 
-    public mutating func remove(_ id: AppID, suppressRediscovery: Bool = true) {
+    /// 목록에서 제거해도 실행 중에는 임시 앱으로 표시한다. Dock 동기화의 재등록만 억제한다.
+    public mutating func remove(_ id: AppID) {
         guard let app = configuration.apps.first(where: { $0.id == id }) else { return }
-        if suppressRediscovery {
-            configuration.removedApps.removeAll { $0.id == id || sameInstallation($0, app) }
-            configuration.removedApps.append(app)
+        clearAutomaticPinningSuppression(for: app)
+        configuration.removedApps.append(app)
+        for index in configuration.apps.indices where configuration.apps[index].id == id || sameInstallation(configuration.apps[index], app) {
+            configuration.apps[index].isPinned = false
+            configuration.apps[index].isExcluded = false
         }
-        let removedIDs = Set(configuration.apps.filter {
-            $0.id == id || (suppressRediscovery && sameInstallation($0, app))
-        }.map(\.id))
-        configuration.apps.removeAll { removedIDs.contains($0.id) }
-        configuration.order.removeAll { removedIDs.contains($0) }
+    }
+
+    /// 내부 중복 정리만 항목을 완전히 지운다. 사용자의 등록 정책은 변경하지 않는다.
+    public mutating func discard(_ id: AppID) {
+        configuration.apps.removeAll { $0.id == id }
+        configuration.order.removeAll { $0 == id }
+    }
+
+    private mutating func clearAutomaticPinningSuppression(for app: AppEntry) {
+        configuration.removedApps.removeAll { $0.id == app.id || sameInstallation($0, app) }
     }
 
     /// SwiftUI 목록의 이동 계약처럼 삭제 전 배열의 삽입 위치를 받는다.

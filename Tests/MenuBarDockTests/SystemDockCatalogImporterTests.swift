@@ -6,8 +6,8 @@ import Testing
 @Suite("macOS Dock 고정 앱 가져오기")
 @MainActor
 struct SystemDockCatalogImporterTests {
-    @Test("이동한 삭제 앱도 Dock 동기화로 복원하지 않고 새 경로 배치에서 한 번만 확인한다")
-    func movedRemovedApplicationsStayRemovedDuringLiveDockUpdates() throws {
+    @Test("이동한 등록 해제 앱은 Dock 동기화로 다시 고정하지 않고 새 경로는 한 번만 확인한다")
+    func movedUnpinnedApplicationsStayUnpinnedDuringLiveDockUpdates() throws {
         let removed = entry("removed")
         let otherRemoved = entry("other-removed")
         var retained = entry("retained")
@@ -37,7 +37,7 @@ struct SystemDockCatalogImporterTests {
         let preserved = try #require(catalog.configuration.removedApps.first { $0.id == removed.id })
         #expect(preserved.bundlePath == moved.bundlePath)
         #expect(preserved.bookmarkData == moved.bookmarkData)
-        #expect(catalog.isRemoved(moved))
+        #expect(catalog.isAutomaticPinningSuppressed(moved))
     }
 
     @Test("먼저 실행했던 앱을 Dock에 추가해도 등록 목록의 끝에 한 번만 붙인다")
@@ -116,10 +116,20 @@ struct SystemDockCatalogImporterTests {
         SystemDockCatalogImporter.importApplications(
             from: originalURLs + [URL(fileURLWithPath: added.bundlePath)], into: &catalog, resolve: resolve
         )
-        #expect(catalog.orderedApps.map(\.id) == [first.id, added.id])
+        #expect(catalog.orderedApps.map(\.id) == [first.id, removed.id, added.id])
         #expect(catalog.orderedApps.first?.isPinned == false)
         #expect(catalog.orderedApps.last?.isPinned == true)
-        #expect(catalog.visibleItems(runningIDs: [removed.id]).map(\.id) == [added.id])
+        #expect(catalog.visibleItems(runningIDs: [removed.id]).map(\.id) == [removed.id, added.id])
+        #expect(catalog.visibleItems(runningIDs: []).map(\.id) == [added.id])
+        // macOS Dock에서 뺐다가 다시 추가해도 이 앱에서 해제한 등록 상태를 유지한다.
+        SystemDockCatalogImporter.importApplications(from: [], into: &catalog, resolve: resolve)
+        SystemDockCatalogImporter.importApplications(
+            from: [URL(fileURLWithPath: removed.bundlePath)], into: &catalog, resolve: resolve
+        )
+        #expect(catalog.savedApps.map(\.id) == [added.id])
+        catalog.save(removed.id)
+        #expect(catalog.savedApps.map(\.id) == [added.id, removed.id])
+        #expect(!catalog.isAutomaticPinningSuppressed(removed))
     }
 
     @Test("처음 해석하지 못한 앱은 다음 자동 갱신에서 다시 가져온다")
