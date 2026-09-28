@@ -1,8 +1,12 @@
 # Menu Bar Dock
 
-자주 쓰는 앱을 메뉴 막대에 놓고, 정해 둔 순서대로 여는 macOS 앱입니다. Swift 6와 AppKit으로 만들며 Apple Silicon용 `arm64` 앱 번들을 생성합니다.
+macOS Dock에 고정한 앱과 실행 중인 앱을 메뉴 막대에서 바로 여세요.
 
-![Menu Bar Dock 앱 선택 패널](docs/assets/switcher.png)
+<p align="center">
+  <img src="docs/assets/menu-bar-hero.png" width="605" alt="실제 macOS 메뉴 막대에 나란히 놓인 시스템 설정, ChatGPT, Safari, Slack, Notion, Visual Studio Code, Finder 아이콘">
+</p>
+
+각 앱 아이콘을 클릭하면 바로 실행하거나 전환합니다. 앱 순서·크기·간격을 조절하고, 메뉴 막대에 다 들어가지 않는 앱은 `Option+Tab`으로 선택할 수 있습니다.
 
 [시작하기](#시작하기) · [사용 안내](docs/user-guide.md) · [개발과 기여](CONTRIBUTING.md) · [아키텍처](docs/architecture.md) · [배포](docs/releasing.md)
 
@@ -34,13 +38,24 @@ open "build/Menu Bar Dock.app"
 - **고정**한 앱은 종료 후에도 표시됩니다. **표시**를 끄면 메뉴 막대와 선택 패널에서 제외됩니다.
 - 아이콘은 기본 24pt이며 16~32pt 조절값이 그대로 반영됩니다. 아이콘 간격은 0~28pt로 조절하며, 0은 앱이 추가하는 여백이 없는 상태입니다. macOS가 독립 상태 항목에 붙이는 기본 여백은 별개입니다. 크기·간격·개수를 조절하고 크기와 간격만 기본값으로 되돌릴 수 있습니다. 메뉴 막대에 다 들어가지 않는 앱도 `Option+Tab` 선택 패널에서 열 수 있습니다.
 
-![앱 목록과 고정·표시·순서를 조절하는 설정 화면](docs/assets/settings.png)
+<details>
+<summary>설정 화면 보기</summary>
+
+<p align="center">
+  <img src="docs/assets/settings.png" width="540" alt="앱 목록, 고정·표시, 아이콘 크기·간격, 단축키를 한 창에서 조절하는 설정">
+</p>
+
+</details>
 
 macOS Dock에 고정한 앱과 Finder는 시작할 때 자동으로 가져옵니다. 이후 새로 고정한 앱도 Dock 설정 변경을 감지해 추가합니다. `−`로 지운 앱은 목록에서 즉시 사라지고, 자동 감지나 재시작으로 다시 추가되지 않습니다. 복원하려면 `+`로 다시 추가합니다. 실행 중인 일반 앱은 자동 감지합니다. 같은 설치 앱의 여러 창·프로세스와 고정 목록은 하나로 합칩니다. 종료한 앱은 고정한 경우에만 남으며, 제외한 앱은 다시 나타나지 않습니다. 기본 메뉴 막대 표시 한도는 6개이고 설정에서 늘릴 수 있습니다.
 
 앱 실행과 활성화는 저장된 순서를 바꾸지 않습니다. 실행 중 점·밑줄·배지는 표시하지 않으며, 새 앱의 창 위치는 macOS와 해당 앱이 결정합니다. 메뉴 막대가 가려졌을 때도 Finder에서 Menu Bar Dock을 다시 열면 설정에 접근할 수 있습니다.
 
 ## 키보드로 선택하기
+
+<p align="center">
+  <img src="docs/assets/switcher.png" width="416" alt="Option+Tab으로 앱을 고르고 Enter로 여는 선택 패널">
+</p>
 
 | 키 | 동작 |
 | --- | --- |
@@ -68,6 +83,8 @@ macOS Dock에 고정한 앱과 Finder는 시작할 때 자동으로 가져옵니
 명령 정의는 [mise.toml](mise.toml), 빌드·테스트·패키징 구현은 [scripts/](scripts/)에 있습니다. 자동 테스트와 실기기 확인 범위는 구분해 검증 기록에 남깁니다.
 
 ## 코드와 문서
+
+Swift 6와 AppKit으로 구현하며 Apple Silicon용 `arm64` 앱 번들을 생성합니다.
 
 ```text
 DockDomain       앱 순서·고정·제외·표시 정책과 선택 세션
