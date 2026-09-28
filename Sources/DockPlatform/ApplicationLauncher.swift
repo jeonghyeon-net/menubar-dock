@@ -3,13 +3,11 @@ import DockDomain
 import OSLog
 
 public enum ApplicationLaunchError: LocalizedError, Sendable, Equatable {
-    case activationRejected
     case applicationUnavailable
     case differentInstallation
 
     public var errorDescription: String? {
         switch self {
-        case .activationRejected: "macOS가 앱 활성화 요청을 수락하지 않았습니다. 다시 선택해 주세요."
         case .applicationUnavailable: "앱이 실행되기 전에 종료되었습니다. 다시 선택해 주세요."
         case .differentInstallation: "선택한 설치 위치와 실행된 앱이 일치하지 않습니다. 설정에서 앱 경로를 확인해 주세요."
         }
@@ -21,7 +19,6 @@ public enum ApplicationLaunchError: LocalizedError, Sendable, Equatable {
 protocol ApplicationLaunchingBackend: AnyObject {
     var runningApplications: [RunningAppSnapshot] { get }
     func openApplication(at url: URL, activates: Bool) async throws -> RunningAppSnapshot
-    func activate(_ application: RunningAppSnapshot) -> Bool
     func hide(_ application: RunningAppSnapshot) -> Bool
     func unhide(_ application: RunningAppSnapshot) -> Bool
     func terminate(_ application: RunningAppSnapshot) -> Bool
@@ -61,20 +58,11 @@ public final class ApplicationLauncher {
         let requestID = UUID()
         // 대기자의 취소가 이미 전달한 OS 실행 요청을 취소하거나 중복 실행하지 않게 한다.
         let task = Task { @MainActor [backend] in
-            let matches = backend.runningApplications.filter {
-                $0.bundleURL.map(canonicalApplicationURL) == url
-            }
-            let wasRunning = !matches.isEmpty
-            // openApplication은 실행 중 창이 없는 앱에도 표준 reopen 이벤트를 전달한다.
-            let application = try await backend.openApplication(at: url, activates: !wasRunning)
+            // 기존 앱도 활성화를 포함한 reopen 요청 하나로 연다. 별도의 활성화 요청은
+            // 비동기 복귀 뒤 사용자 입력과 분리될 수 있으므로 Launch Services에 맡긴다.
+            let application = try await backend.openApplication(at: url, activates: true)
             guard application.bundleURL.map(canonicalApplicationURL) == url else {
                 throw ApplicationLaunchError.differentInstallation
-            }
-            if wasRunning {
-                if application.isHidden { _ = backend.unhide(application) }
-                guard backend.activate(application) else {
-                    throw ApplicationLaunchError.activationRejected
-                }
             }
         }
         pending[url] = PendingLaunch(id: requestID, task: task)
@@ -142,11 +130,6 @@ private final class WorkspaceLaunchingBackend: ApplicationLaunchingBackend {
         let application = try await workspace.openApplication(at: url, configuration: configuration)
         guard !application.isTerminated else { throw ApplicationLaunchError.applicationUnavailable }
         return RunningAppSnapshot(application: application)
-    }
-
-    func activate(_ snapshot: RunningAppSnapshot) -> Bool {
-        guard let application = application(snapshot) else { return false }
-        return application.activate(options: [])
     }
 
     func hide(_ snapshot: RunningAppSnapshot) -> Bool {

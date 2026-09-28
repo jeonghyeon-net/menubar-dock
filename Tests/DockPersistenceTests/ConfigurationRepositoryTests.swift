@@ -30,6 +30,142 @@ private func configuration(_ name: String) -> DockConfiguration {
 
 @Suite("설정 저장과 복구")
 struct ConfigurationRepositoryTests {
+    @Test("v1 설정을 읽고 저장해도 앱·순서·고정·제외와 이전 정상 원본을 보존한다")
+    func migratesLegacyConfigurationWithoutLosingUserPolicy() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        let legacy = Data(#"""
+        {
+          "schemaVersion": 1,
+          "apps": [
+            {"id":"pinned","name":"고정 앱","bundleIdentifier":"com.example.pinned","bundlePath":"/Applications/Pinned.app","bookmarkData":"AQID","isPinned":true,"isExcluded":false,"lastSeen":1000000},
+            {"id":"excluded","name":"제외 앱","bundleIdentifier":"com.example.excluded","bundlePath":"/Applications/Excluded.app","isPinned":false,"isExcluded":true,"lastSeen":2000000}
+          ],
+          "order": ["excluded", "pinned"],
+          "preferences": {"iconSize":18,"iconSpacing":4,"maxVisibleApps":9,"showsRunningApps":false,"isCompact":true,"shortcutEnabled":false}
+        }
+        """#.utf8)
+        try legacy.write(to: fixture.primary)
+
+        let result = try await fixture.repository.load()
+        let migrated = result.configuration
+        #expect(!result.isReadOnly)
+        #expect(result.warning == nil)
+        #expect(migrated.schemaVersion == 2)
+        #expect(migrated.order == [AppID(rawValue: "excluded"), AppID(rawValue: "pinned")])
+        #expect(migrated.apps == [
+            AppEntry(id: AppID(rawValue: "pinned"), name: "고정 앱", bundleIdentifier: "com.example.pinned", bundlePath: "/Applications/Pinned.app", bookmarkData: Data([1, 2, 3]), isPinned: true, lastSeen: Date(timeIntervalSince1970: 1_000)),
+            AppEntry(id: AppID(rawValue: "excluded"), name: "제외 앱", bundleIdentifier: "com.example.excluded", bundlePath: "/Applications/Excluded.app", isExcluded: true, lastSeen: Date(timeIntervalSince1970: 2_000)),
+        ])
+        #expect(migrated.preferences == DockPreferences(iconSize: 40, slotWidth: 30, maxVisibleApps: 9, showsRunningApps: false, shortcutEnabled: false))
+        #expect(try Data(contentsOf: fixture.primary) == legacy)
+
+        try await fixture.repository.save(migrated, revision: 1)
+        #expect(try Data(contentsOf: fixture.backup) == legacy)
+        let saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture.primary)) as? [String: Any])
+        let preferences = try #require(saved["preferences"] as? [String: Any])
+        #expect(saved["schemaVersion"] as? Int == 2)
+        #expect(preferences["slotWidth"] as? Double == 30)
+        #expect(preferences["iconSpacing"] == nil)
+        #expect(preferences["isCompact"] == nil)
+        #expect(try await ConfigurationRepository(directory: fixture.directory).load().configuration == migrated)
+    }
+
+    @Test("v1 사용자 크기·간격은 새 범위 안에서 변환한다", arguments: [
+        (24.0, 8.0, 24.0, 34.0),
+        (16.0, -100.0, 20.0, 20.0),
+        (100.0, 100.0, 64.0, 60.0),
+    ])
+    func legacyCustomDimensionsAreMappedAndBounded(_ values: (Double, Double, Double, Double)) async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        let legacy = Data("{\"schemaVersion\":1,\"preferences\":{\"iconSize\":\(values.0),\"iconSpacing\":\(values.1)}}".utf8)
+        try legacy.write(to: fixture.primary)
+        let result = try await fixture.repository.load()
+        #expect(result.configuration.preferences.iconSize == values.2)
+        #expect(result.configuration.preferences.slotWidth == values.3)
+        #expect(!result.isReadOnly)
+    }
+
+    @Test("형식 번호나 선택 설정이 없던 v1 파일에도 새 기본값을 적용한다", arguments: [
+        #"{"schemaVersion":1}"#,
+        #"{"preferences":{"iconSize":18,"iconSpacing":4,"isCompact":true}}"#,
+    ])
+    func legacyMissingFieldsReceiveCurrentDefaults(_ json: String) async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        try Data(json.utf8).write(to: fixture.primary)
+        #expect(try await fixture.repository.load().configuration == DockConfiguration())
+    }
+
+    @Test("손상된 설정은 v1 백업에서 복구하면서 현재 형식으로 저장한다")
+    func legacyBackupRecoversIntoCurrentSchema() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        let legacy = Data(#"{"schemaVersion":1,"preferences":{"iconSize":18,"iconSpacing":7,"maxVisibleApps":3}}"#.utf8)
+        let corrupt = Data("broken primary".utf8)
+        try corrupt.write(to: fixture.primary)
+        try legacy.write(to: fixture.backup)
+        let result = try await fixture.repository.load()
+        let expected = DockConfiguration(preferences: DockPreferences(iconSize: 40, slotWidth: 33, maxVisibleApps: 3))
+        #expect(result.configuration == expected)
+        #expect(result.warning != nil)
+        #expect(try Data(contentsOf: fixture.backup) == legacy)
+        #expect(try await ConfigurationRepository(directory: fixture.directory).load().configuration == expected)
+        let saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture.primary)) as? [String: Any])
+        #expect(saved["schemaVersion"] as? Int == 2)
+        let preserved = try #require(fixture.files().first { $0.lastPathComponent.contains(".corrupt-") })
+        #expect(try Data(contentsOf: preserved) == corrupt)
+    }
+
+    @Test("v2 값은 v1 기본값 변환을 다시 적용하지 않는다")
+    func currentSchemaDoesNotReapplyLegacyMigration() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        try Data(#"{"schemaVersion":2,"preferences":{"iconSize":18,"slotWidth":28,"iconSpacing":12,"isCompact":true}}"#.utf8).write(to: fixture.primary)
+        let result = try await fixture.repository.load()
+        #expect(result.configuration.preferences == DockPreferences(iconSize: 20, slotWidth: 28))
+        try await fixture.repository.save(result.configuration, revision: 1)
+        #expect(try await ConfigurationRepository(directory: fixture.directory).load().configuration == result.configuration)
+    }
+
+    @Test("잘못된 형식 저장은 revision을 소비하거나 정상 파일을 바꾸지 않는다")
+    func failedSchemaSaveDoesNotConsumeRevision() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        let initial = configuration("이전 상태")
+        try await fixture.repository.save(initial, revision: 5)
+        let previous = try Data(contentsOf: fixture.primary)
+        var invalid = configuration("지원하지 않는 상태")
+        invalid.schemaVersion = 0
+        await #expect(throws: ConfigurationRepositoryError.invalidSchema(0)) {
+            try await fixture.repository.save(invalid, revision: 10)
+        }
+        #expect(try Data(contentsOf: fixture.primary) == previous)
+        let expected = configuration("성공한 상태")
+        try await fixture.repository.save(expected, revision: 10)
+        try await fixture.repository.save(initial, revision: 9)
+        #expect(try await fixture.repository.load().configuration == expected)
+    }
+
+    @Test("v1을 변환해도 미래 형식 백업이 있으면 양쪽 원본을 보호한다")
+    func migrationDoesNotOverwriteFutureBackup() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        let legacy = Data(#"{"schemaVersion":1,"preferences":{"iconSize":18,"iconSpacing":4}}"#.utf8)
+        let future = Data(#"{"schemaVersion":3,"preferences":"future"}"#.utf8)
+        try legacy.write(to: fixture.primary)
+        try future.write(to: fixture.backup)
+        let result = try await fixture.repository.load()
+        #expect(result.configuration == DockConfiguration())
+        await #expect(throws: ConfigurationRepositoryError.futureSchema(3)) {
+            try await fixture.repository.save(result.configuration, revision: 1)
+        }
+        #expect(try Data(contentsOf: fixture.primary) == legacy)
+        #expect(try Data(contentsOf: fixture.backup) == future)
+        #expect(try fixture.files().count == 2)
+    }
+
     @Test("첫 실행과 다른 저장소 인스턴스의 재실행 사이에 설정을 보존한다")
     func persistsAcrossInstances() async throws {
         let fixture = try RepositoryFixture()
@@ -192,7 +328,7 @@ struct ConfigurationRepositoryTests {
         defer { fixture.cleanUp() }
         var invalid = configuration("앱")
         invalid.order = [AppID(rawValue: "missing"), invalid.apps[0].id, invalid.apps[0].id]
-        invalid.preferences.iconSpacing = -1
+        invalid.preferences.slotWidth = -1
         try await fixture.repository.save(invalid, revision: 1)
         #expect(try await fixture.repository.load().configuration == invalid.normalized())
     }

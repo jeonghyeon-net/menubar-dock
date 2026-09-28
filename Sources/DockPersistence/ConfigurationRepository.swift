@@ -104,10 +104,16 @@ public actor ConfigurationRepository {
                 isReadOnly: true
             )
         }
-        guard version == DockConfiguration.currentSchemaVersion else {
+        let configuration: DockConfiguration
+        switch version {
+        case 1:
+            // 이전 화면의 크기·간격 단위는 저장 경계에서만 현재 모델로 변환한다.
+            configuration = try Self.makeDecoder().decode(LegacyConfigurationV1.self, from: data).migrated()
+        case DockConfiguration.currentSchemaVersion:
+            configuration = try Self.makeDecoder().decode(DockConfiguration.self, from: data)
+        default:
             throw ConfigurationRepositoryError.invalidSchema(version)
         }
-        let configuration = try Self.makeDecoder().decode(DockConfiguration.self, from: data)
         let normalized = configuration.normalized()
         return ConfigurationLoadResult(
             configuration: normalized,
@@ -194,7 +200,62 @@ public actor ConfigurationRepository {
 
         init(from decoder: any Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
-            schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? DockConfiguration.currentSchemaVersion
+            // 형식 번호가 없던 기존 파일도 v1 규칙으로 읽어 새 기본값을 적용한다.
+            schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        }
+    }
+
+    private struct LegacyConfigurationV1: Decodable {
+        let apps: [AppEntry]
+        let order: [AppID]
+        let preferences: LegacyPreferencesV1
+
+        private enum CodingKeys: String, CodingKey { case apps, order, preferences }
+
+        init(from decoder: any Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            apps = try values.decodeIfPresent([AppEntry].self, forKey: .apps) ?? []
+            order = try values.decodeIfPresent([AppID].self, forKey: .order) ?? []
+            preferences = try values.decodeIfPresent(LegacyPreferencesV1.self, forKey: .preferences) ?? LegacyPreferencesV1()
+        }
+
+        func migrated() -> DockConfiguration {
+            DockConfiguration(apps: apps, order: order, preferences: preferences.migrated())
+        }
+    }
+
+    private struct LegacyPreferencesV1: Decodable {
+        var iconSize: Double = 18
+        var iconSpacing: Double = 4
+        var maxVisibleApps: Int = 6
+        var showsRunningApps: Bool = true
+        var shortcutEnabled: Bool = true
+
+        private enum CodingKeys: String, CodingKey {
+            case iconSize, iconSpacing, maxVisibleApps, showsRunningApps, shortcutEnabled
+        }
+
+        init() {}
+
+        init(from decoder: any Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            iconSize = try values.decodeIfPresent(Double.self, forKey: .iconSize) ?? 18
+            iconSpacing = try values.decodeIfPresent(Double.self, forKey: .iconSpacing) ?? 4
+            maxVisibleApps = try values.decodeIfPresent(Int.self, forKey: .maxVisibleApps) ?? 6
+            showsRunningApps = try values.decodeIfPresent(Bool.self, forKey: .showsRunningApps) ?? true
+            shortcutEnabled = try values.decodeIfPresent(Bool.self, forKey: .shortcutEnabled) ?? true
+        }
+
+        func migrated() -> DockPreferences {
+            // v1 기본 아이콘 크기만 새 기본값으로 바꾸고 사용자의 개별 선택은 범위 안에서 보존한다.
+            // 폐기한 isCompact 값은 읽지 않아 메뉴 막대의 독립 앱 아이콘 표시를 막지 않는다.
+            DockPreferences(
+                iconSize: iconSize == 18 ? 40 : iconSize,
+                slotWidth: 30 + (iconSpacing - 4),
+                maxVisibleApps: maxVisibleApps,
+                showsRunningApps: showsRunningApps,
+                shortcutEnabled: shortcutEnabled
+            )
         }
     }
 }

@@ -2,49 +2,46 @@ import Foundation
 
 public struct DockPreferences: Codable, Equatable, Sendable {
     public var iconSize: Double
-    public var iconSpacing: Double
+    public var slotWidth: Double
     public var maxVisibleApps: Int
     public var showsRunningApps: Bool
-    public var isCompact: Bool
     public var shortcutEnabled: Bool
 
     public init(
-        iconSize: Double = 18, iconSpacing: Double = 4, maxVisibleApps: Int = 6,
-        showsRunningApps: Bool = true, isCompact: Bool = false, shortcutEnabled: Bool = true
+        iconSize: Double = 40, slotWidth: Double = 30, maxVisibleApps: Int = 6,
+        showsRunningApps: Bool = true, shortcutEnabled: Bool = true
     ) {
         self.iconSize = iconSize
-        self.iconSpacing = iconSpacing
+        self.slotWidth = slotWidth
         self.maxVisibleApps = maxVisibleApps
         self.showsRunningApps = showsRunningApps
-        self.isCompact = isCompact
         self.shortcutEnabled = shortcutEnabled
     }
 
     public func normalized() -> Self {
         var copy = self
-        copy.iconSize = iconSize.isFinite ? min(max(iconSize, 14), 24) : 18
-        copy.iconSpacing = iconSpacing.isFinite ? min(max(iconSpacing, 0), 12) : 4
+        copy.iconSize = iconSize.isFinite ? min(max(iconSize, 20), 64) : 40
+        copy.slotWidth = slotWidth.isFinite ? min(max(slotWidth, 20), 60) : 30
         copy.maxVisibleApps = min(max(maxVisibleApps, 1), 20)
         return copy
     }
 
     private enum CodingKeys: String, CodingKey {
-        case iconSize, iconSpacing, maxVisibleApps, showsRunningApps, isCompact, shortcutEnabled
+        case iconSize, slotWidth, maxVisibleApps, showsRunningApps, shortcutEnabled
     }
 
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        iconSize = try values.decodeIfPresent(Double.self, forKey: .iconSize) ?? 18
-        iconSpacing = try values.decodeIfPresent(Double.self, forKey: .iconSpacing) ?? 4
+        iconSize = try values.decodeIfPresent(Double.self, forKey: .iconSize) ?? 40
+        slotWidth = try values.decodeIfPresent(Double.self, forKey: .slotWidth) ?? 30
         maxVisibleApps = try values.decodeIfPresent(Int.self, forKey: .maxVisibleApps) ?? 6
         showsRunningApps = try values.decodeIfPresent(Bool.self, forKey: .showsRunningApps) ?? true
-        isCompact = try values.decodeIfPresent(Bool.self, forKey: .isCompact) ?? false
         shortcutEnabled = try values.decodeIfPresent(Bool.self, forKey: .shortcutEnabled) ?? true
     }
 }
 
 public struct DockConfiguration: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var apps: [AppEntry]

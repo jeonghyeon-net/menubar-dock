@@ -43,16 +43,16 @@ struct ApplicationLauncherTests {
         #expect(backend.openedURLs.count == 1)
     }
 
-    @Test("실행 중인 앱에는 reopen과 활성화를 요청하고 숨김을 해제한다")
+    @Test("숨겨진 기존 앱도 활성화를 포함한 reopen 요청 하나로 연다")
     func activatesRunningApplication() async throws {
         let fixture = try PlatformFixture()
         let backend = TestLaunchingBackend()
         backend.runningApplications = [runningSnapshot(url: fixture.applicationURL, hidden: true)]
         let launcher = ApplicationLauncher(backend: backend)
         try await launcher.open(fixture.entry())
-        #expect(backend.requestedActivations == [false])
-        #expect(backend.activated == [123])
-        #expect(backend.unhidden == [123])
+        #expect(backend.requestedActivations == [true])
+        #expect(backend.openedURLs == [canonicalApplicationURL(fixture.applicationURL)])
+        #expect(backend.unhidden.isEmpty)
     }
 
     @Test("같은 bundle ID인 다른 위치의 설치본은 새 실행 대상과 구분한다")
@@ -64,18 +64,18 @@ struct ApplicationLauncherTests {
         let launcher = ApplicationLauncher(backend: backend)
         try await launcher.open(fixture.entry())
         #expect(backend.requestedActivations == [true])
-        #expect(backend.activated.isEmpty)
         #expect(backend.openedURLs == [canonicalApplicationURL(fixture.applicationURL)])
     }
 
-    @Test("활성화 거절을 성공으로 보고하지 않는다")
-    func propagatesActivationRejection() async throws {
+    @Test("OS가 다른 설치본을 반환하면 성공으로 보고하지 않는다")
+    func rejectsSubstitutedInstallation() async throws {
         let fixture = try PlatformFixture()
+        let other = try PlatformFixture(name: "Other")
         let backend = TestLaunchingBackend()
         backend.runningApplications = [runningSnapshot(url: fixture.applicationURL)]
-        backend.acceptsActivation = false
+        backend.returnedApplication = runningSnapshot(url: other.applicationURL)
         let launcher = ApplicationLauncher(backend: backend)
-        await #expect(throws: ApplicationLaunchError.activationRejected) {
+        await #expect(throws: ApplicationLaunchError.differentInstallation) {
             try await launcher.open(fixture.entry())
         }
     }
@@ -118,11 +118,10 @@ private final class TestLaunchingBackend: ApplicationLaunchingBackend {
     var runningApplications: [RunningAppSnapshot] = []
     var openedURLs: [URL] = []
     var requestedActivations: [Bool] = []
-    var activated: [Int32] = []
     var unhidden: [Int32] = []
     var terminated: [Int32] = []
     var rejectsTermination: Set<Int32> = []
-    var acceptsActivation = true
+    var returnedApplication: RunningAppSnapshot?
     var suspends = false
     var failure: ApplicationLaunchError?
     private var continuation: CheckedContinuation<RunningAppSnapshot, Error>?
@@ -139,7 +138,7 @@ private final class TestLaunchingBackend: ApplicationLaunchingBackend {
                 started = nil
             }
         }
-        return runningApplications.first { canonicalApplicationURL($0.bundleURL ?? url) == url }
+        return returnedApplication ?? runningApplications.first { canonicalApplicationURL($0.bundleURL ?? url) == url }
             ?? runningSnapshot(url: url)
     }
 
@@ -151,11 +150,6 @@ private final class TestLaunchingBackend: ApplicationLaunchingBackend {
     func complete(with result: Result<RunningAppSnapshot, Error>) {
         continuation?.resume(with: result)
         continuation = nil
-    }
-
-    func activate(_ application: RunningAppSnapshot) -> Bool {
-        activated.append(application.processIdentifier)
-        return acceptsActivation
     }
 
     func hide(_ application: RunningAppSnapshot) -> Bool { true }
