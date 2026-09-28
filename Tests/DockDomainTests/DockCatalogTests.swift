@@ -123,20 +123,20 @@ struct DockCatalogTests {
     @Test("잘못된 외부 환경설정이 음수 폭이나 무한 크기를 만들지 않는다")
     func preferencesAreBounded() {
         let normalized = DockPreferences(iconSize: .infinity, slotWidth: -.infinity, maxVisibleApps: -200).normalized()
-        #expect(normalized.iconSize == 40)
+        #expect(normalized.iconSize == 24)
         #expect(normalized.slotWidth == 30)
         #expect(normalized.maxVisibleApps == 1)
-        #expect(DockPreferences(iconSize: -10, slotWidth: 100, maxVisibleApps: 200).normalized() == DockPreferences(iconSize: 20, slotWidth: 60, maxVisibleApps: 20))
-        #expect(DockPreferences(iconSize: 100, slotWidth: -10).normalized() == DockPreferences(iconSize: 64, slotWidth: 20))
+        #expect(DockPreferences(iconSize: -10, slotWidth: 100, maxVisibleApps: 200).normalized() == DockPreferences(iconSize: 16, slotWidth: 60, maxVisibleApps: 20))
+        #expect(DockPreferences(iconSize: 100, slotWidth: -10).normalized() == DockPreferences(iconSize: 32, slotWidth: 22))
         #expect(DockPreferences(iconSize: .nan, slotWidth: .nan).normalized() == DockPreferences())
     }
 
     @Test("아이콘 크기와 슬롯 폭은 독립 설정으로 보존한다")
     func iconAndSlotDimensionsAreIndependent() throws {
-        let preferences = DockPreferences(iconSize: 56, slotWidth: 24)
+        let preferences = DockPreferences(iconSize: 30, slotWidth: 24)
         #expect(preferences.normalized() == preferences)
         let encoded = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(DockPreferences.self, from: encoded) == preferences)
-        #expect(try JSONDecoder().decode(DockPreferences.self, from: Data("{}".utf8)) == DockPreferences(iconSize: 40, slotWidth: 30))
+        #expect(try JSONDecoder().decode(DockPreferences.self, from: Data("{}".utf8)) == DockPreferences(iconSize: 24, slotWidth: 30))
     }
 }

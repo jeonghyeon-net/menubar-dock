@@ -5,6 +5,13 @@ import DockShortcuts
 
 @MainActor
 final class SettingsWindowController: NSWindowController, NSTabViewDelegate {
+    enum Tab: String {
+        case applications = "앱"
+        case appearance = "표시"
+        case shortcuts = "단축키"
+        case information = "정보"
+    }
+
     private let model: DockPresentationModel
     private let noticeView = NSStackView()
     private let noticeLabel = NSTextField(wrappingLabelWithString: "")
@@ -39,7 +46,8 @@ final class SettingsWindowController: NSWindowController, NSTabViewDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    func show() {
+    func show(tab: Tab? = nil) {
+        if let tab { tabs.selectTabViewItem(withIdentifier: tab.rawValue) }
         NSApp.activate()
         showWindow(nil)
         resizeToSelectedPane(force: true)
@@ -349,23 +357,29 @@ private final class AppearanceSettingsPage: NSView {
     private let model: DockPresentationModel
     private let running = ActionCheckbox(title: "실행 중인 앱 자동 표시", action: nil)
     private let login = ActionCheckbox(title: "로그인할 때 시작", action: nil)
-    private let iconSlider = NSSlider(value: 40, minValue: 20, maxValue: 64, target: nil, action: nil)
-    private let slotSlider = NSSlider(value: 30, minValue: 20, maxValue: 60, target: nil, action: nil)
+    private let iconSlider = NSSlider(value: 24, minValue: 16, maxValue: 32, target: nil, action: nil)
+    private let slotSlider = NSSlider(value: 30, minValue: 22, maxValue: 60, target: nil, action: nil)
     private let count = NSPopUpButton()
     private let iconLabel = label("")
     private let slotLabel = label("")
     private let loginLabel = label("", secondary: true)
+    private let reset = ActionButton(title: "기본값", action: nil)
 
     init(model: DockPresentationModel) {
         self.model = model
         super.init(frame: .zero)
         running.onChange = { [weak self] value in self?.update(\.showsRunningApps, value) }
         login.onChange = { [weak model] value in model?.perform(.login(value)) }
+        reset.onAction = { [weak self] in self?.resetIconLayout() }
+        reset.controlSize = .small
+        reset.setAccessibilityLabel("아이콘 크기 및 영역 너비 기본값")
+        reset.toolTip = "아이콘 크기와 영역 너비만 기본값으로 되돌립니다."
         running.toolTip = "고정하지 않은 앱도 실행 중일 때 메뉴 막대에 표시합니다."
         iconSlider.target = self
         iconSlider.action = #selector(changeIconSize)
         iconSlider.controlSize = .small
         iconSlider.setAccessibilityLabel("아이콘 크기")
+        iconSlider.toolTip = "메뉴 막대 높이와 아이콘 영역 너비에 맞춰 축소됩니다."
         slotSlider.target = self
         slotSlider.action = #selector(changeSlotWidth)
         slotSlider.controlSize = .small
@@ -382,10 +396,11 @@ private final class AppearanceSettingsPage: NSView {
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 10
+        content.spacing = 8
         install(content, in: self)
         addFullWidth(formRow("아이콘 크기", control: iconSlider, trailing: iconLabel), to: content)
         addFullWidth(formRow("아이콘 영역 너비", control: slotSlider, trailing: slotLabel), to: content)
+        addFullWidth(formRow("", control: reset), to: content)
         addFullWidth(formRow("최대 표시 개수", control: count), to: content)
         let divider = NSBox()
         divider.boxType = .separator
@@ -422,11 +437,21 @@ private final class AppearanceSettingsPage: NSView {
         iconSlider.isEnabled = !model.isReadOnly
         slotSlider.isEnabled = iconSlider.isEnabled
         count.isEnabled = iconSlider.isEnabled
+        reset.isEnabled = !model.isReadOnly
     }
 
     private func update<Value>(_ keyPath: WritableKeyPath<DockPreferences, Value>, _ value: Value) {
         var preferences = model.preferences
         preferences[keyPath: keyPath] = value
+        model.perform(.preferences(preferences))
+    }
+
+    private func resetIconLayout() {
+        guard !model.isReadOnly else { return }
+        var preferences = model.preferences
+        let defaults = DockPreferences()
+        preferences.iconSize = defaults.iconSize
+        preferences.slotWidth = defaults.slotWidth
         model.perform(.preferences(preferences))
     }
 

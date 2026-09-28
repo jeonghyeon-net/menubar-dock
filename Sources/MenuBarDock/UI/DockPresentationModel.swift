@@ -20,6 +20,7 @@ enum DockUIAction {
     case quitApp(AppID)
     case reveal(AppID)
     case settings
+    case appearanceSettings
     case help
     case checkForUpdates
     case shortcut(ShortcutAction, ShortcutBinding)

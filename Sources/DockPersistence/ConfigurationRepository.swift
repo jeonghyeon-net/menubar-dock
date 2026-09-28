@@ -104,13 +104,18 @@ public actor ConfigurationRepository {
                 isReadOnly: true
             )
         }
-        let configuration: DockConfiguration
+        var configuration: DockConfiguration
         switch version {
         case 1:
             // 이전 화면의 크기·간격 단위는 저장 경계에서만 현재 모델로 변환한다.
             configuration = try Self.makeDecoder().decode(LegacyConfigurationV1.self, from: data).migrated()
         case DockConfiguration.currentSchemaVersion:
             configuration = try Self.makeDecoder().decode(DockConfiguration.self, from: data)
+            // 초기 v2의 40pt는 잘못 배포된 기본값이다. 형식은 그대로 두고 기본값만 보정하며,
+            // 정상 사용자 파일의 손상으로 안내하지 않도록 정규화 비교 전에 적용한다.
+            if configuration.preferences.iconSize == 40 {
+                configuration.preferences.iconSize = 24
+            }
         default:
             throw ConfigurationRepositoryError.invalidSchema(version)
         }
@@ -250,7 +255,7 @@ public actor ConfigurationRepository {
             // v1 기본 아이콘 크기만 새 기본값으로 바꾸고 사용자의 개별 선택은 범위 안에서 보존한다.
             // 폐기한 isCompact 값은 읽지 않아 메뉴 막대의 독립 앱 아이콘 표시를 막지 않는다.
             DockPreferences(
-                iconSize: iconSize == 18 ? 40 : iconSize,
+                iconSize: iconSize == 18 ? 24 : iconSize,
                 slotWidth: 30 + (iconSpacing - 4),
                 maxVisibleApps: maxVisibleApps,
                 showsRunningApps: showsRunningApps,

@@ -20,12 +20,14 @@ final class StatusItemController: NSObject {
         let items: [DockItem]
         let preferences: DockPreferences
         let slotOrder: [Int]
-        let height: CGFloat
+        let buttonSizes: [NSSize]
     }
 
     private let model: DockPresentationModel
     private let makeStatusItem: (CGFloat) -> NSStatusItem
     private let removeStatusItem: (NSStatusItem) -> Void
+    private let currentEvent: () -> NSEvent?
+    private let presentMenu: (NSMenu, NSStatusBarButton) -> Void
     private var slots: [Slot] = []
     private var subscriptions: Set<AnyCancellable> = []
     private var observations: [NSObjectProtocol] = []
@@ -36,24 +38,36 @@ final class StatusItemController: NSObject {
     init(
         model: DockPresentationModel,
         makeStatusItem: ((CGFloat) -> NSStatusItem)? = nil,
-        removeStatusItem: ((NSStatusItem) -> Void)? = nil
+        removeStatusItem: ((NSStatusItem) -> Void)? = nil,
+        currentEvent: (() -> NSEvent?)? = nil,
+        menuPresenter: ((NSMenu, NSStatusBarButton) -> Void)? = nil
     ) {
         self.model = model
         self.makeStatusItem = makeStatusItem ?? { NSStatusBar.system.statusItem(withLength: $0) }
         self.removeStatusItem = removeStatusItem ?? { NSStatusBar.system.removeStatusItem($0) }
+        self.currentEvent = currentEvent ?? { NSApp.currentEvent }
+        self.presentMenu = menuPresenter ?? { menu, button in
+            button.highlight(true)
+            defer { button.highlight(false) }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+        }
         super.init()
         model.$items.combineLatest(model.$preferences).sink { [weak self] _, _ in
             // Published는 값 변경 전에 알리므로 다음 실행 구간에서 최신 투영을 읽는다.
             Task { @MainActor in self?.update() }
         }.store(in: &subscriptions)
-        for name in [NSApplication.didChangeScreenParametersNotification, NSWindow.didMoveNotification, NSWindow.didChangeBackingPropertiesNotification] {
+        for name in [NSApplication.didChangeScreenParametersNotification, NSWindow.didMoveNotification,
+                     NSWindow.didResizeNotification, NSWindow.didChangeBackingPropertiesNotification,
+                     NSView.frameDidChangeNotification, NSView.boundsDidChangeNotification] {
             observations.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
-                // 실제 상태 항목 이동만 순서 재계산에 사용한다. 다른 앱 창 이벤트는 무시한다.
-                let movedWindow = (notification.object as? NSWindow).map(ObjectIdentifier.init)
+                // 실제 상태 항목 이동·크기만 사용하고 다른 창이나 뷰 이벤트는 무시한다.
+                let source = (notification.object as? NSObject).map(ObjectIdentifier.init)
                 Task { @MainActor in
                     guard let self else { return }
                     if name != NSApplication.didChangeScreenParametersNotification,
-                       !self.slots.contains(where: { $0.item.button?.window.map(ObjectIdentifier.init) == movedWindow }) { return }
+                       !self.slots.contains(where: {
+                           $0.item.button.map(ObjectIdentifier.init) == source || $0.item.button?.window.map(ObjectIdentifier.init) == source
+                       }) { return }
                     self.update()
                 }
             })
@@ -76,23 +90,29 @@ final class StatusItemController: NSObject {
         let preferences = model.preferences
         let visible = Array(model.items.prefix(preferences.maxVisibleApps))
         resizeSlots(to: visible.count)
+        for slot in slots where slot.item.length != CGFloat(preferences.slotWidth) {
+            slot.item.length = CGFloat(preferences.slotWidth)
+        }
         let ordered = orderedSlots()
-        let state = RenderState(items: visible, preferences: preferences, slotOrder: ordered.map(\.number), height: NSStatusBar.system.thickness)
+        let sizes = ordered.map { $0.item.button?.bounds.size ?? .zero }
+        let state = RenderState(items: visible, preferences: preferences, slotOrder: ordered.map(\.number), buttonSizes: sizes)
         // 시스템 외관 변경은 표준 버튼이 처리한다. 동일한 앱/순서의 이미지를 반복 교체하지 않는다.
         guard renderedState != state else { return }
         renderedState = state
         renderCount += 1
-        let iconSize = CGFloat(preferences.iconSize)
         for (slot, entry) in zip(ordered, visible) {
             slot.appID = entry.id
-            slot.item.length = CGFloat(preferences.slotWidth)
             guard let button = slot.item.button else { continue }
+            let height = button.bounds.height > 0 ? button.bounds.height : NSStatusBar.system.thickness
+            let width = button.bounds.width > 0 ? min(button.bounds.width, CGFloat(preferences.slotWidth)) : CGFloat(preferences.slotWidth)
+            // 노치 유무와 설정값에 관계없이 실제 버튼의 사방에 최소 2pt 여백을 남긴다.
+            let iconSize = max(1, min(CGFloat(preferences.iconSize), height - 4, width - 4))
             let image = model.imageForApp(entry.app).copy() as? NSImage
             image?.size = NSSize(width: iconSize, height: iconSize)
             button.image = image
             button.toolTip = entry.app.name
             button.setAccessibilityLabel(entry.app.name)
-            button.setAccessibilityHelp("앱 열기")
+            button.setAccessibilityHelp("앱 열기. 우클릭 또는 Control 클릭으로 설정")
         }
     }
 
@@ -113,9 +133,11 @@ final class StatusItemController: NSObject {
             if let button = item.button {
                 button.target = self
                 button.action = #selector(activate(_:))
-                button.sendAction(on: .leftMouseUp)
+                button.sendAction(on: [.leftMouseUp, .rightMouseUp])
                 button.imagePosition = .imageOnly
-                button.imageScaling = .scaleNone
+                button.imageScaling = .scaleProportionallyDown
+                button.postsFrameChangedNotifications = true
+                button.postsBoundsChangedNotifications = true
             }
             slots.append(Slot(number: number, item: item))
         }
@@ -141,6 +163,42 @@ final class StatusItemController: NSObject {
 
     @objc private func activate(_ sender: NSStatusBarButton) {
         guard !isTornDown, let id = slots.first(where: { $0.item.button === sender })?.appID else { return }
+        if let event = currentEvent(),
+           event.type == .rightMouseUp || (event.type == .leftMouseUp && event.modifierFlags.contains(.control)) {
+            showMenu(for: id, anchor: sender)
+            return
+        }
         model.perform(.open(id))
+    }
+
+    private func showMenu(for id: AppID, anchor: NSStatusBarButton) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        append("설정…", action: .settings, to: menu, key: ",")
+        append("크기 및 간격…", action: .appearanceSettings, to: menu)
+        if let app = model.items.first(where: { $0.id == id })?.app {
+            menu.addItem(.separator())
+            let pin = append("고정", action: .pin(id, !app.isPinned), to: menu, enabled: !model.isReadOnly)
+            pin.state = app.isPinned ? .on : .off
+            append("목록에서 숨기기", action: .exclude(id, true), to: menu, enabled: !model.isReadOnly)
+        }
+        menu.addItem(.separator())
+        append("Menu Bar Dock 종료", action: .quit, to: menu, key: "q")
+        presentMenu(menu, anchor)
+    }
+
+    @discardableResult
+    private func append(_ title: String, action: DockUIAction, to menu: NSMenu, key: String = "", enabled: Bool = true) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(performMenuAction(_:)), keyEquivalent: key)
+        item.target = self
+        item.representedObject = action
+        item.isEnabled = enabled
+        menu.addItem(item)
+        return item
+    }
+
+    @objc private func performMenuAction(_ sender: NSMenuItem) {
+        guard !isTornDown, sender.isEnabled, let action = sender.representedObject as? DockUIAction else { return }
+        model.perform(action)
     }
 }

@@ -49,6 +49,83 @@ struct NativeUIBehaviorTests {
         #expect(fixture.openedIDs == [fixture.entries[2].id])
     }
 
+    @Test func contextClicksShowSettingsWhileLeftAndAccessibilityActionsOpenApps() throws {
+        let fixture = UIInputFixture()
+        var items: [NSStatusItem] = []
+        var event: NSEvent?
+        var menus: [NSMenu] = []
+        var anchors: [NSStatusBarButton] = []
+        let controller = StatusItemController(model: fixture.model, makeStatusItem: { length in
+            let item = NSStatusBar.system.statusItem(withLength: length)
+            items.append(item)
+            return item
+        }, currentEvent: { event }, menuPresenter: { menu, button in
+            menus.append(menu)
+            anchors.append(button)
+        })
+        defer { controller.tearDown(); fixture.close() }
+        let first = try #require(items.first { $0.button?.accessibilityLabel() == fixture.entries[0].name }?.button)
+        let second = try #require(items.first { $0.button?.accessibilityLabel() == fixture.entries[1].name }?.button)
+        event = try makeMouseRelease(.rightMouseUp, button: first)
+        try dispatchControlAction(first)
+        #expect(fixture.openedIDs.isEmpty)
+        #expect(anchors.last === first)
+        let menu = try #require(menus.last)
+        #expect(menu.item(at: 0)?.title == "설정…")
+        #expect(menu.item(at: 1)?.title == "크기 및 간격…")
+        let settings = try #require(menu.item(at: 0))
+        let settingsAction = try #require(settings.action)
+        #expect(NSApp.sendAction(settingsAction, to: settings.target, from: settings))
+        #expect(fixture.actions.contains { if case .settings = $0 { true } else { false } })
+        let appearance = try #require(menu.item(at: 1))
+        let appearanceAction = try #require(appearance.action)
+        #expect(NSApp.sendAction(appearanceAction, to: appearance.target, from: appearance))
+        #expect(fixture.actions.contains { if case .appearanceSettings = $0 { true } else { false } })
+
+        event = try makeMouseRelease(.leftMouseUp, flags: .control, button: second)
+        try dispatchControlAction(second)
+        #expect(menus.count == 2)
+        #expect(anchors.last === second)
+        #expect(fixture.openedIDs.isEmpty)
+        event = try makeMouseRelease(.leftMouseUp, button: second)
+        try dispatchControlAction(second)
+        // 접근성 press처럼 현재 마우스 이벤트가 없는 명령도 앱을 연다.
+        event = nil
+        try dispatchControlAction(first)
+        #expect(fixture.openedIDs == [fixture.entries[1].id, fixture.entries[0].id])
+        #expect(menus.count == 2)
+        event = try makeMouseRelease(.rightMouseUp, button: first)
+        try dispatchControlAction(first)
+        #expect(menus.count == 3)
+        #expect(items.allSatisfy { $0.menu == nil })
+    }
+
+    @Test func iconsFitTheSlotAndReactToButtonHeightChanges() throws {
+        let fixture = UIInputFixture()
+        fixture.model.preferences.iconSize = 32
+        fixture.model.preferences.slotWidth = 22
+        var items: [NSStatusItem] = []
+        let controller = StatusItemController(model: fixture.model, makeStatusItem: { length in
+            let item = NSStatusBar.system.statusItem(withLength: length)
+            items.append(item)
+            return item
+        })
+        defer { controller.tearDown(); fixture.close() }
+        let button = try #require(items.first?.button)
+        let image = try #require(button.image)
+        #expect(image.size.width <= 18)
+        #expect(image.size.height <= button.bounds.height - 4)
+        #expect(button.imageScaling == .scaleProportionallyDown)
+        button.setFrameSize(NSSize(width: 22, height: 18))
+        controller.update()
+        #expect(button.image?.size == NSSize(width: 14, height: 14))
+        // NSStatusBarButton은 image 할당 후 시스템 높이로 돌아갈 수 있으므로 최종 경계를 확인한다.
+        controller.update()
+        let resizedImage = try #require(button.image)
+        #expect(resizedImage.size.width <= min(button.bounds.width, fixture.model.preferences.slotWidth) - 4)
+        #expect(resizedImage.size.height <= button.bounds.height - 4)
+    }
+
     @Test func hiddenAppsDoNotLeaveBlankOrManagementStatusItems() {
         let fixture = UIInputFixture()
         var active: [NSStatusItem] = []
@@ -295,6 +372,15 @@ private func makeKey(_ code: UInt16, flags: NSEvent.ModifierFlags = [], window: 
         windowNumber: window?.windowNumber ?? 0, context: nil,
         characters: code == 48 ? "\t" : "", charactersIgnoringModifiers: code == 48 ? "\t" : "",
         isARepeat: false, keyCode: code
+    ))
+}
+
+@MainActor
+private func makeMouseRelease(_ type: NSEvent.EventType, flags: NSEvent.ModifierFlags = [], button: NSStatusBarButton) throws -> NSEvent {
+    try #require(NSEvent.mouseEvent(
+        with: type, location: .zero, modifierFlags: flags,
+        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: button.window?.windowNumber ?? 0,
+        context: nil, eventNumber: 1, clickCount: 1, pressure: 0
     ))
 }
 

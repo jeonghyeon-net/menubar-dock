@@ -8,7 +8,7 @@ public struct DockPreferences: Codable, Equatable, Sendable {
     public var shortcutEnabled: Bool
 
     public init(
-        iconSize: Double = 40, slotWidth: Double = 30, maxVisibleApps: Int = 6,
+        iconSize: Double = 24, slotWidth: Double = 30, maxVisibleApps: Int = 6,
         showsRunningApps: Bool = true, shortcutEnabled: Bool = true
     ) {
         self.iconSize = iconSize
@@ -20,8 +20,8 @@ public struct DockPreferences: Codable, Equatable, Sendable {
 
     public func normalized() -> Self {
         var copy = self
-        copy.iconSize = iconSize.isFinite ? min(max(iconSize, 20), 64) : 40
-        copy.slotWidth = slotWidth.isFinite ? min(max(slotWidth, 20), 60) : 30
+        copy.iconSize = iconSize.isFinite ? min(max(iconSize, 16), 32) : 24
+        copy.slotWidth = slotWidth.isFinite ? min(max(slotWidth, 22), 60) : 30
         copy.maxVisibleApps = min(max(maxVisibleApps, 1), 20)
         return copy
     }
@@ -32,7 +32,7 @@ public struct DockPreferences: Codable, Equatable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        iconSize = try values.decodeIfPresent(Double.self, forKey: .iconSize) ?? 40
+        iconSize = try values.decodeIfPresent(Double.self, forKey: .iconSize) ?? 24
         slotWidth = try values.decodeIfPresent(Double.self, forKey: .slotWidth) ?? 30
         maxVisibleApps = try values.decodeIfPresent(Int.self, forKey: .maxVisibleApps) ?? 6
         showsRunningApps = try values.decodeIfPresent(Bool.self, forKey: .showsRunningApps) ?? true

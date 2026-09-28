@@ -27,6 +27,7 @@ final class ApplicationController {
     private var isReadOnly = false
     private var isTerminating = false
     private var pendingShowSettings = false
+    private var pendingSettingsTab: SettingsWindowController.Tab?
     private(set) var started = false
 
     private(set) lazy var presentation = DockPresentationModel(
@@ -63,13 +64,22 @@ final class ApplicationController {
         publish()
         statusItem = StatusItemController(model: presentation)
         started = true
-        if showSettings || pendingShowSettings { settings?.show(); pendingShowSettings = false }
+        if showSettings || pendingShowSettings {
+            settings?.show(tab: pendingSettingsTab)
+            pendingShowSettings = false
+            pendingSettingsTab = nil
+        }
     }
 
     func showSwitcher() { cycle(1) }
 
-    func showSettings() {
-        if let settings { settings.show() } else { pendingShowSettings = true }
+    func showSettings(tab: SettingsWindowController.Tab? = nil) {
+        if let settings {
+            settings.show(tab: tab)
+        } else {
+            pendingShowSettings = true
+            pendingSettingsTab = tab
+        }
         refreshLoginStatus()
     }
 
@@ -166,6 +176,7 @@ final class ApplicationController {
             }
         case .reveal(let id): withApp(id) { launcher.reveal($0) }
         case .settings: showSettings()
+        case .appearanceSettings: showSettings(tab: .appearance)
         case .help: showHelp()
         case .quit: NSApp.terminate(nil)
         case .dismissNotice: presentation.notice = nil

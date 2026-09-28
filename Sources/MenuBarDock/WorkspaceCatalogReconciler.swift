@@ -35,6 +35,7 @@ struct WorkspaceCatalogReconciler {
         resolve: (URL) throws -> AppEntry,
         refresh: (AppEntry) -> AppEntry?
     ) {
+        mergeDuplicateInstallations(in: &catalog)
         let knownApps = catalog.orderedApps
         var byPath = Dictionary(
             knownApps.map { (canonicalPath($0.bundlePath), $0) },
@@ -81,6 +82,43 @@ struct WorkspaceCatalogReconciler {
                 // 종료 중이거나 읽을 수 없는 앱 하나 때문에 나머지 관찰 결과를 버리지 않는다.
                 continue
             }
+        }
+    }
+
+    private struct InstallationIdentity: Hashable {
+        let canonicalPath: String
+        let bundleIdentifier: String?
+    }
+
+    private static func mergeDuplicateInstallations(in catalog: inout DockCatalog) {
+        var retainedByInstallation: [InstallationIdentity: AppEntry] = [:]
+        // 값 스냅샷을 순회하여 제거 중 인덱스가 바뀌어도 사용자가 먼저 놓은 ID를 유지한다.
+        for app in catalog.orderedApps {
+            let identity = InstallationIdentity(
+                canonicalPath: canonicalPath(app.bundlePath), bundleIdentifier: app.bundleIdentifier
+            )
+            guard var retained = retainedByInstallation[identity] else {
+                retainedByInstallation[identity] = app
+                continue
+            }
+            let pinned = retained.isPinned || app.isPinned
+            let excluded = retained.isExcluded || app.isExcluded
+            if app.lastSeen > retained.lastSeen {
+                retained.name = app.name
+                retained.bundlePath = app.bundlePath
+                retained.bookmarkData = app.bookmarkData ?? retained.bookmarkData
+            } else {
+                retained.bookmarkData = retained.bookmarkData ?? app.bookmarkData
+            }
+            retained.lastSeen = max(retained.lastSeen, app.lastSeen)
+            catalog.upsert(retained)
+            catalog.pin(retained.id, pinned)
+            // pin(true)는 제외를 해제하므로 명시적 제외 정책은 병합의 마지막에 복원한다.
+            catalog.exclude(retained.id, excluded)
+            catalog.remove(app.id)
+            retained.isPinned = pinned
+            retained.isExcluded = excluded
+            retainedByInstallation[identity] = retained
         }
     }
 

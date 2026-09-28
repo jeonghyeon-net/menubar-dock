@@ -30,6 +30,54 @@ private func configuration(_ name: String) -> DockConfiguration {
 
 @Suite("설정 저장과 복구")
 struct ConfigurationRepositoryTests {
+    @Test("v2의 과대한 기본값만 조용히 보정하고 사용자 앱과 설정을 보존한다", arguments: [
+        (40.0, 24.0, false),
+        (28.0, 28.0, false),
+        (56.0, 32.0, true),
+    ])
+    func correctsOversizedDefaultWithoutResettingUserConfiguration(_ values: (Double, Double, Bool)) async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        var original = configuration("고정 앱")
+        let excluded = AppEntry(
+            id: AppID(rawValue: "excluded-id"), name: "제외 앱", bundleIdentifier: "test.excluded",
+            bundlePath: "/Applications/Excluded.app", isExcluded: true,
+            lastSeen: Date(timeIntervalSince1970: 2_000)
+        )
+        original.apps.append(excluded)
+        original.order.insert(excluded.id, at: 0)
+        original.preferences = DockPreferences(iconSize: values.0, slotWidth: 46, maxVisibleApps: 9, showsRunningApps: false, shortcutEnabled: false)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        let encoded = try encoder.encode(original)
+        try encoded.write(to: fixture.primary)
+
+        let result = try await fixture.repository.load()
+        var expected = original
+        expected.preferences.iconSize = values.1
+        #expect(result.configuration == expected)
+        #expect((result.warning != nil) == values.2)
+        #expect(!result.isReadOnly)
+        #expect(result.configuration.schemaVersion == 2)
+        #expect(try Data(contentsOf: fixture.primary) == encoded)
+
+        try await fixture.repository.save(result.configuration, revision: 1)
+        #expect(try Data(contentsOf: fixture.backup) == encoded)
+        let reopened = try await ConfigurationRepository(directory: fixture.directory).load()
+        #expect(reopened.configuration == expected)
+        #expect(reopened.warning == nil)
+    }
+
+    @Test("v2 크기 필드가 없으면 24pt 아이콘과 30pt 영역을 사용한다")
+    func currentSchemaMissingDimensionsUseCorrectedDefaults() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        try Data(#"{"schemaVersion":2,"preferences":{}}"#.utf8).write(to: fixture.primary)
+        let result = try await fixture.repository.load()
+        #expect(result.configuration == DockConfiguration(preferences: DockPreferences(iconSize: 24, slotWidth: 30)))
+        #expect(result.warning == nil)
+    }
+
     @Test("v1 설정을 읽고 저장해도 앱·순서·고정·제외와 이전 정상 원본을 보존한다")
     func migratesLegacyConfigurationWithoutLosingUserPolicy() async throws {
         let fixture = try RepositoryFixture()
@@ -57,7 +105,7 @@ struct ConfigurationRepositoryTests {
             AppEntry(id: AppID(rawValue: "pinned"), name: "고정 앱", bundleIdentifier: "com.example.pinned", bundlePath: "/Applications/Pinned.app", bookmarkData: Data([1, 2, 3]), isPinned: true, lastSeen: Date(timeIntervalSince1970: 1_000)),
             AppEntry(id: AppID(rawValue: "excluded"), name: "제외 앱", bundleIdentifier: "com.example.excluded", bundlePath: "/Applications/Excluded.app", isExcluded: true, lastSeen: Date(timeIntervalSince1970: 2_000)),
         ])
-        #expect(migrated.preferences == DockPreferences(iconSize: 40, slotWidth: 30, maxVisibleApps: 9, showsRunningApps: false, shortcutEnabled: false))
+        #expect(migrated.preferences == DockPreferences(iconSize: 24, slotWidth: 30, maxVisibleApps: 9, showsRunningApps: false, shortcutEnabled: false))
         #expect(try Data(contentsOf: fixture.primary) == legacy)
 
         try await fixture.repository.save(migrated, revision: 1)
@@ -73,8 +121,8 @@ struct ConfigurationRepositoryTests {
 
     @Test("v1 사용자 크기·간격은 새 범위 안에서 변환한다", arguments: [
         (24.0, 8.0, 24.0, 34.0),
-        (16.0, -100.0, 20.0, 20.0),
-        (100.0, 100.0, 64.0, 60.0),
+        (16.0, -100.0, 16.0, 22.0),
+        (100.0, 100.0, 32.0, 60.0),
     ])
     func legacyCustomDimensionsAreMappedAndBounded(_ values: (Double, Double, Double, Double)) async throws {
         let fixture = try RepositoryFixture()
@@ -107,7 +155,7 @@ struct ConfigurationRepositoryTests {
         try corrupt.write(to: fixture.primary)
         try legacy.write(to: fixture.backup)
         let result = try await fixture.repository.load()
-        let expected = DockConfiguration(preferences: DockPreferences(iconSize: 40, slotWidth: 33, maxVisibleApps: 3))
+        let expected = DockConfiguration(preferences: DockPreferences(iconSize: 24, slotWidth: 33, maxVisibleApps: 3))
         #expect(result.configuration == expected)
         #expect(result.warning != nil)
         #expect(try Data(contentsOf: fixture.backup) == legacy)
@@ -124,7 +172,7 @@ struct ConfigurationRepositoryTests {
         defer { fixture.cleanUp() }
         try Data(#"{"schemaVersion":2,"preferences":{"iconSize":18,"slotWidth":28,"iconSpacing":12,"isCompact":true}}"#.utf8).write(to: fixture.primary)
         let result = try await fixture.repository.load()
-        #expect(result.configuration.preferences == DockPreferences(iconSize: 20, slotWidth: 28))
+        #expect(result.configuration.preferences == DockPreferences(iconSize: 18, slotWidth: 28))
         try await fixture.repository.save(result.configuration, revision: 1)
         #expect(try await ConfigurationRepository(directory: fixture.directory).load().configuration == result.configuration)
     }
