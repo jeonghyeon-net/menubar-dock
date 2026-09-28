@@ -201,6 +201,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("&#42;&#42;굵게&#42;&#42;", notes)
         self.assertIn("&#126;&#126;삭제&#126;&#126;", notes)
         self.assertIn("&#64;someone", notes)
+        self.assertIn("<code>&#64;someone</code>", notes)
         self.assertIn("&#60;img src&#61;x&#62;", notes)
         self.assertIn("&#96;코드&#96;", notes)
         self.assertNotIn("**굵게**", notes)

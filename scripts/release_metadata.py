@@ -104,7 +104,12 @@ def build_number(commit: str) -> str:
 def escape_subject(subject: str) -> str:
     # 커밋 제목의 Markdown·HTML·사용자 멘션을 데이터로 표시한다. 코드 펜스도 열리지 않는다.
     normalized = " ".join("".join(character for character in subject if character.isprintable() or character.isspace()).split())
-    return "".join("&#" + str(ord(character)) + ";" if character in string.punctuation else character for character in normalized)
+    fragments = []
+    for token in re.split(r"(@[A-Za-z0-9_/\-]+)", normalized):
+        escaped = "".join("&#" + str(ord(character)) + ";" if character in string.punctuation else character for character in token)
+        # GitHub는 HTML entity의 @도 멘션으로 바꾼다. 코드 영역은 멘션 후처리에서 제외된다.
+        fragments.append("<code>" + escaped + "</code>" if token.startswith("@") else escaped)
+    return "".join(fragments)
 
 
 def verified_manifest(directory: Path) -> dict:
