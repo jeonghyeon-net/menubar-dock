@@ -24,7 +24,7 @@ fi
 wait "$task_pid"
 task_pid=''
 cat "$task_dir/run.log"
-rg -q 'SMOKE: started=true' "$task_dir/run.log"
+grep -q 'SMOKE: started=true' "$task_dir/run.log"
 test -s "$task_dir/preferences.json"
 test -s "$task_dir/preferences.backup.json"
 printf '실제 앱 시작·저장·정상 종료 검증 통과\n'

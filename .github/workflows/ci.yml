@@ -12,12 +12,14 @@ jobs:
   verify:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: 도구 체인 확인
         run: swift --version
       - name: 경고 없는 빌드
         run: swift build -Xswiftc -warnings-as-errors
-      - name: 도메인·저장소·플랫폼 테스트
+      - name: 정책·플랫폼·UI 테스트
         run: ./scripts/test.sh --enable-code-coverage
       - name: 앱 번들 및 배포 패키지
         run: ./scripts/package.sh
@@ -25,7 +27,7 @@ jobs:
         run: '"build/Menu Bar Dock.app/Contents/MacOS/MenuBarDock" --self-test'
       - name: 실제 앱 시작·저장·종료
         run: ./scripts/smoke-test.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: MenuBarDock-arm64
           path: |
