@@ -7,6 +7,7 @@ import DockShortcuts
 @MainActor
 enum DockUIAction {
     case open(AppID)
+    case openSearchResult(SearchResult)
     case pin(AppID, Bool)
     case exclude(AppID, Bool)
     case remove(AppID)

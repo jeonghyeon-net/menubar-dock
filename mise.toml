@@ -64,6 +64,10 @@ run = "swift package clean"
 description = "슬라이더를 트랙 밖까지 드래그하며 손잡이 위치와 즉시 반영 검사"
 run = "./scripts/check-settings-input.sh"
 
+[tasks."switcher-input-check"]
+description = "검색창 실제 입력·한글 조합·선택·취소·포커스 유지 검사"
+run = "./scripts/check-switcher-input.sh"
+
 [tasks.version]
 description = "Git 태그에서 현재 또는 다음 패치 버전 계산"
 run = "./scripts/version.sh"

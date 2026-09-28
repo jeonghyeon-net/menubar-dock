@@ -10,3 +10,4 @@ swift build -Xswiftc -warnings-as-errors
 ./scripts/test.sh
 ./scripts/check-status-input.sh
 ./scripts/check-settings-input.sh
+./scripts/check-switcher-input.sh

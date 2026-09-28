@@ -10,6 +10,31 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct ApplicationControllerTests {
+    @Test func separateSearchResultsCanOpenWhileAnotherLaunchIsPending() async {
+        var started: [String] = []
+        var pending: [String: CheckedContinuation<Void, Never>] = [:]
+        let controller = ApplicationController(
+            directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+            readSystemDock: { [] },
+            openSearchResult: { result in
+                started.append(result.id)
+                await withCheckedContinuation { pending[result.id] = $0 }
+            }
+        )
+        let first = SearchResult(url: URL(fileURLWithPath: "/fixture/first.app"), name: "첫 앱", kind: .application)
+        let second = SearchResult(url: URL(fileURLWithPath: "/fixture/second.pdf"), name: "두 번째 문서", kind: .file)
+        let originalApps = controller.presentation.apps
+        controller.presentation.perform(.openSearchResult(first))
+        controller.presentation.perform(.openSearchResult(first))
+        controller.presentation.perform(.openSearchResult(second))
+        for _ in 0..<20 where started.count < 2 { await Task.yield() }
+        // 같은 결과의 연타만 합치고, 다른 선택은 앞선 앱 실행을 기다리지 않는다.
+        #expect(started.sorted() == [first.id, second.id].sorted())
+        #expect(controller.presentation.apps == originalApps)
+        pending.values.forEach { $0.resume() }
+        controller.stop()
+    }
+
     @Test("실행 중인 앱도 삭제 명령을 받으면 설정 행과 선택 목록에서 제거된다")
     func removingRunningApplicationActuallyRemovesItsRow() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

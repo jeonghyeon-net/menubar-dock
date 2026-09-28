@@ -8,6 +8,10 @@
 
 단축키는 Option+Tab / Shift+Option+Tab 이동, Enter 실행, Esc 취소다. Option을 놓아도 실행하지 않는다. 사용자가 조합을 변경할 수 있다. 이미 실행된 앱에는 표준 reopen/activate 요청을 보내고, 종료된 앱은 실행한다. 새 창의 디스플레이 강제 지정과 다른 앱 창 이동은 사용자 요청으로 제외했다.
 
+선택 패널의 검색은 `NSMetadataQuery`로 macOS Spotlight 인덱스를 읽는다. `SearchSession`은 검색어별 결과와 선택을 관리하고, `SpotlightSearchService`는 OS 조회·취소·결과 변환을 담당한다. `SwitcherController`는 입력창을 유지한 채 앱 전환과 검색 결과를 전환한다. 새 입력마다 이전 요청을 취소하고 요청 세대 번호도 비교하여 늦은 응답을 버린다. 한글 조합 중에는 검색과 실행을 보류하며, 검색 결과 열기는 `SearchResultOpener`를 통해 처리한다. 앱 catalog의 고정·순서·제외 상태는 검색으로 변경하지 않는다.
+
+직접 파일을 순회하거나 새 검색 DB를 만들지 않는다. 색인된 항목의 이름과 표시 이름만 검색하고 숨김 항목·앱 번들 내부를 제외한다. 결과는 작은 배치로 처리하며 입력·취소에 실행 기회를 돌려주고, 상위 50개만 유지한다. 검색어·결과를 영속화하지 않는다. 공개 API의 범위와 수명 관리는 [Apple의 NSMetadataQuery 문서](https://developer.apple.com/library/archive/documentation/Carbon/Conceptual/SpotlightQuery/Concepts/QueryingMetadata.html)를 따른다.
+
 ## 기술 선택
 
 | 영역 | 구현 |

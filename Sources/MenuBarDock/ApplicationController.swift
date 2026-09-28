@@ -16,6 +16,7 @@ final class ApplicationController {
     private let monitor = WorkspaceMonitor()
     private let resolver = ApplicationResolver()
     private let launcher = ApplicationLauncher()
+    private let openSearchResult: @MainActor (SearchResult) async throws -> Void
     private let icons = IconRepository()
     private let login = LoginItemService()
     private let releaseChecker = ReleaseChecker()
@@ -26,6 +27,7 @@ final class ApplicationController {
     private var saveTask: Task<Void, Never>?
     private var updateTask: Task<Void, Never>?
     private var commandTasks: [AppID: Task<Void, Never>] = [:]
+    private var searchOpenTasks: [String: Task<Void, Never>] = [:]
     private var isReadOnly = false
     private var isTerminating = false
     private var pendingShowSettings = false
@@ -40,10 +42,15 @@ final class ApplicationController {
     private var settings: SettingsWindowController?
     private lazy var shortcuts = GlobalShortcutService { [weak self] direction in self?.cycle(direction) }
 
-    init(directory: URL, readSystemDock: (() throws -> [URL])? = nil) {
+    init(
+        directory: URL, readSystemDock: (() throws -> [URL])? = nil,
+        openSearchResult: (@MainActor (SearchResult) async throws -> Void)? = nil
+    ) {
         repository = ConfigurationRepository(directory: directory)
         self.readSystemDock = readSystemDock ?? { try SystemDockReader().applicationURLs() }
         systemDockMonitor = readSystemDock == nil ? SystemDockMonitor() : nil
+        let opener = SearchResultOpener()
+        self.openSearchResult = openSearchResult ?? { try await opener.open($0) }
     }
 
     func start(showSettings: Bool) async {
@@ -161,6 +168,14 @@ final class ApplicationController {
         guard !isTerminating else { return }
         switch action {
         case .open(let id): open(id)
+        case .openSearchResult(let result):
+            guard searchOpenTasks[result.id] == nil else { return }
+            searchOpenTasks[result.id] = Task { [weak self] in
+                guard let self else { return }
+                defer { searchOpenTasks[result.id] = nil }
+                do { try await openSearchResult(result) }
+                catch is CancellationError {} catch { report(error) }
+            }
         case .pin(let id, let value): mutate { $0.pin(id, value) }
         case .exclude(let id, let value): mutate { $0.exclude(id, value) }
         case .remove(let id): mutate { $0.remove(id) }
@@ -331,6 +346,7 @@ final class ApplicationController {
         saveTask?.cancel()
         updateTask?.cancel()
         commandTasks.values.forEach { $0.cancel() }
+        searchOpenTasks.values.forEach { $0.cancel() }
     }
 
     private func report(_ error: any Error) {

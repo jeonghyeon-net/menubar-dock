@@ -51,4 +51,12 @@ AppKit/Carbon 경계다. 다른 로컬 target에 의존하지 않는다.
 
 전체 소스 계약은 Swift compiler와 대응 Tests target으로 검증한다. 과거 설계의 AppStore/reducer/effect 명칭 대신 현재 구현은 ApplicationController + DockCatalog의 값 연산을 사용한다.
 
+## 선택 패널 검색
+
+- `SearchResult`/`SearchSession` (`DockDomain`): 파일 URL·이름·종류와 검색어별 선택 상태. 새 검색어는 결과를 즉시 비우고 동일 검색어의 갱신은 선택 ID를 보존한다.
+- `SpotlightSearching` (`DockPlatform`): `search(_:receive:)`/`cancel()`. 결과·완료·오류를 `SpotlightSearchUpdate`로 전달하며 AppKit/Foundation 조회 객체는 모듈 밖으로 내보내지 않는다.
+- `SpotlightSearchService`: `NSMetadataQuery`로 기존 색인을 읽고 숨김·앱 내부 결과를 제외한다. 취소된 요청의 콜백은 무시한다.
+- `SearchResultOpener`: 결과를 실행 직전에 다시 검증한다. 앱은 기존 resolver/launcher, 파일·폴더는 `NSWorkspace`를 사용한다.
+- `SwitcherController`: 네이티브 검색 입력과 100ms 입력 지연 처리, 세션별 요청 격리, 앱 선택 복원. 검색 결과는 `DockUIAction.openSearchResult`로 실행하며 catalog에 추가하지 않는다.
+
 `SystemDockReader.applicationURLs()`는 macOS Dock을 변경하지 않고 Finder와 고정 앱의 로컬 URL을 순서대로 읽는다. 조립 계층의 `SystemDockCatalogImporter`가 기존 ID·순서·제외를 유지해 고정 목록에 합친다. `SystemDockMonitor.start(onChange:)`는 파일 변경 감시를 시작하며 실패 시 오류를 던진다. `stop()`은 감시와 대기 작업을 정리한다. 삭제 기록과 기존 Dock 경로는 `removedApps`·`knownSystemDockPaths`에 저장한다.

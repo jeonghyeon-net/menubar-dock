@@ -1,9 +1,10 @@
 import AppKit
 import Combine
 import DockDomain
+import DockPlatform
 
 @MainActor
-final class SwitcherController: NSObject, NSWindowDelegate {
+final class SwitcherController: NSObject, NSWindowDelegate, NSSearchFieldDelegate {
     private let model: DockPresentationModel
     private var session: SwitcherSession?
     private var panel: SwitcherPanel?
@@ -11,11 +12,24 @@ final class SwitcherController: NSObject, NSWindowDelegate {
     private var screenObserver: NSObjectProtocol?
     private var selectedButtons: [AppID: NSButton] = [:]
     private var capturedScreenFrame: NSRect?
+    private let search: any SpotlightSearching
+    private var searchSession = SearchSession()
+    private var searchTask: Task<Void, Never>?
+    private var searchGeneration: UInt64 = 0
+    private var isSearching = false
+    private var searchError: String?
+    private var content: SwitcherContentView?
+    private var searchField: NSSearchField?
+    private var dockView: NSView?
+    private var resultsView: SwitcherSearchResultsView?
+
+    private var hasQuery: Bool { !searchSession.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var isVisible: Bool { panel?.isVisible == true }
 
-    init(model: DockPresentationModel) {
+    init(model: DockPresentationModel, search: any SpotlightSearching = SpotlightSearchService()) {
         self.model = model
+        self.search = search
         super.init()
         subscription = model.$items.sink { [weak self] _ in
             Task { @MainActor in
@@ -44,13 +58,14 @@ final class SwitcherController: NSObject, NSWindowDelegate {
             panel.setFrameOrigin(origin)
         } else { panel.center() }
         panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(panel.contentView)
+        panel.makeFirstResponder(searchField)
         announceSelection()
     }
 
     func advance(direction: Int) {
         guard isVisible else { show(direction: direction, currentID: nil); return }
-        session?.move(direction)
+        if hasQuery { searchSession.move(direction) }
+        else { session?.move(direction) }
         render()
         announceSelection()
     }
@@ -59,6 +74,17 @@ final class SwitcherController: NSObject, NSWindowDelegate {
         let closingPanel = panel
         let hadSession = session != nil
         panel = nil
+        searchGeneration &+= 1
+        searchTask?.cancel()
+        searchTask = nil
+        search.cancel()
+        searchSession.reset()
+        content = nil
+        searchField = nil
+        dockView = nil
+        resultsView = nil
+        isSearching = false
+        searchError = nil
         session = nil
         selectedButtons.removeAll()
         capturedScreenFrame = nil
@@ -89,16 +115,7 @@ final class SwitcherController: NSObject, NSWindowDelegate {
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.delegate = self
-        return panel
-    }
-
-    private func render() {
-        guard let panel, let session else { return }
-        let itemMap = Dictionary(uniqueKeysWithValues: model.items.map { ($0.id, $0) })
-        let items = session.ids.compactMap { itemMap[$0] }
-        let width = min(max(220, CGFloat(items.count) * 64 + 32), min(capturedScreenFrame?.width ?? 760, 760) - 32)
-        panel.setContentSize(NSSize(width: width, height: 116))
-        let content = SwitcherContentView(frame: NSRect(x: 0, y: 0, width: width, height: 116))
+        let content = SwitcherContentView()
         content.handleKey = { [weak self] event in self?.handleKey(event) }
         content.material = .popover
         content.blendingMode = .behindWindow
@@ -106,12 +123,54 @@ final class SwitcherController: NSObject, NSWindowDelegate {
         content.wantsLayer = true
         content.layer?.cornerRadius = 18
         content.layer?.masksToBounds = true
-        // layer의 모서리만 자르면 behindWindow 재질은 사각형으로 남는다.
-        // AppKit의 material/shadow 마스크에도 같은 윤곽을 전달한다.
-        content.maskImage = Self.roundedMaterialMask(size: content.bounds.size, radius: 18)
-        content.setAccessibilityLabel("앱 선택. 방향키로 이동하고 Enter로 열기, Escape로 취소")
+        self.content = content
         panel.contentView = content
 
+        let field = NSSearchField()
+        field.placeholderString = "앱, 파일, 폴더 검색"
+        field.font = .systemFont(ofSize: 15)
+        field.focusRingType = .none
+        field.delegate = self
+        field.setAccessibilityLabel("Spotlight 검색")
+        // 입력창과 field editor는 이동·검색 결과 갱신 중 교체하지 않는다.
+        content.addSubview(field)
+        searchField = field
+        let dock = NSView()
+        content.addSubview(dock)
+        dockView = dock
+        let results = SwitcherSearchResultsView()
+        results.openResult = { [weak self] result in self?.openSearchResult(result) }
+        content.addSubview(results)
+        resultsView = results
+        return panel
+    }
+
+    private func render() {
+        guard let panel, let session, let content, let searchField, let dockView, let resultsView else { return }
+        let width = min(max(420, CGFloat(session.ids.count) * 64 + 32), min(capturedScreenFrame?.width ?? 760, 620) - 32)
+        let bodyHeight: CGFloat = hasQuery ? max(104, CGFloat(min(6, searchSession.results.count)) * 46) : 116
+        let height = bodyHeight + 44
+        let oldFrame = panel.frame
+        panel.setFrame(NSRect(x: oldFrame.midX - width / 2, y: oldFrame.maxY - height, width: width, height: height), display: true)
+        content.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        searchField.frame = NSRect(x: 16, y: height - 38, width: width - 32, height: 26)
+        dockView.frame = NSRect(x: 0, y: 0, width: width, height: bodyHeight)
+        resultsView.frame = NSRect(x: 8, y: 6, width: width - 16, height: bodyHeight - 6)
+        dockView.isHidden = hasQuery
+        resultsView.isHidden = !hasQuery
+        // 재질과 그림자에도 같은 마스크를 적용하여 모서리에 사각 배경이 남지 않게 한다.
+        content.maskImage = Self.roundedMaterialMask(size: content.bounds.size, radius: 18)
+        if hasQuery {
+            let message = searchError ?? (isSearching ? "검색 중…" : "검색 결과 없음")
+            resultsView.update(results: searchSession.results, selectedID: searchSession.selectedID, message: message)
+        } else { renderDock(in: dockView, width: width, session: session) }
+        panel.invalidateShadow()
+    }
+
+    private func renderDock(in content: NSView, width: CGFloat, session: SwitcherSession) {
+        content.subviews.forEach { $0.removeFromSuperview() }
+        let itemMap = Dictionary(uniqueKeysWithValues: model.items.map { ($0.id, $0) })
+        let items = session.ids.compactMap { itemMap[$0] }
         let selectedName = items.first(where: { $0.id == session.selectedID })?.app.name
         let title = NSTextField(labelWithString: selectedName ?? "표시할 앱이 없습니다")
         title.font = .systemFont(ofSize: 12, weight: .medium)
@@ -173,8 +232,6 @@ final class SwitcherController: NSObject, NSWindowDelegate {
         settings.setAccessibilityLabel("설정")
         settings.frame = NSRect(x: width - 34, y: 8, width: 22, height: 22)
         content.addSubview(settings)
-        panel.invalidateShadow()
-        if panel.isKeyWindow { panel.makeFirstResponder(content) }
     }
 
     /// NSVisualEffectView.maskImage는 재질과 윈도우 그림자에 함께 적용된다.
@@ -186,6 +243,65 @@ final class SwitcherController: NSObject, NSWindowDelegate {
         }
     }
 
+    func controlTextDidChange(_ notification: Notification) {
+        guard notification.object as? NSSearchField === searchField else { return }
+        updateSearch()
+    }
+
+    private func updateSearch() {
+        guard let field = searchField else { return }
+        let query = field.stringValue
+        searchGeneration &+= 1
+        let generation = searchGeneration
+        searchTask?.cancel()
+        search.cancel()
+        searchSession.updateQuery(query)
+        searchSession.receive([], for: query)
+        searchError = nil
+        isSearching = hasQuery
+        render()
+        // 조합 중인 한글은 AppKit이 확정할 때까지 검색·실행하지 않는다.
+        guard hasQuery, (field.currentEditor() as? NSTextView)?.hasMarkedText() != true else { return }
+        searchTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(100)) }
+            catch { return }
+            guard let self, self.isVisible, self.searchGeneration == generation else { return }
+            self.search.search(query) { [weak self] update in
+                guard let self, self.isVisible, self.searchGeneration == generation else { return }
+                self.searchSession.receive(update.results, for: query)
+                self.isSearching = !update.isComplete
+                self.searchError = update.errorMessage
+                self.render()
+            }
+        }
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard !textView.hasMarkedText() else { return false }
+        switch NSStringFromSelector(commandSelector) {
+        case "moveUp:": advance(direction: -1)
+        case "moveDown:": advance(direction: 1)
+        case "moveLeft:" where !hasQuery: advance(direction: -1)
+        case "moveRight:" where !hasQuery: advance(direction: 1)
+        case "insertTab:", "insertBacktab:":
+            // 전역 핫키가 이미 처리하는 Option+Tab은 field editor에서 중복 이동하지 않는다.
+            if NSApp.currentEvent?.modifierFlags.contains(.option) != true {
+                advance(direction: NSStringFromSelector(commandSelector) == "insertBacktab:" ? -1 : 1)
+            }
+        case "insertNewline:": confirmSelection()
+        case "cancelOperation:": cancelSearchOrClose()
+        default: return false
+        }
+        return true
+    }
+
+    private func cancelSearchOrClose() {
+        if hasQuery {
+            searchField?.stringValue = ""
+            updateSearch()
+        } else { close() }
+    }
+
     private func handleKey(_ event: NSEvent) {
         // Option+Tab은 전역 단축키 경로만 처리해 같은 입력이 두 번 이동하지 않게 한다.
         if event.keyCode == 48 && event.modifierFlags.contains(.option) { return }
@@ -194,19 +310,30 @@ final class SwitcherController: NSObject, NSWindowDelegate {
         case 124, 125: advance(direction: 1)
         case 48: advance(direction: event.modifierFlags.contains(.shift) ? -1 : 1)
         case 36, 76: confirmSelection()
-        case 53: close()
+        case 53: cancelSearchOrClose()
         default: break
         }
     }
 
     private func confirmSelection() {
-        guard let id = session?.selectedID else { return }
+        guard (searchField?.currentEditor() as? NSTextView)?.hasMarkedText() != true else { return }
+        if hasQuery {
+            guard let result = searchSession.selectedResult else { return }
+            openSearchResult(result)
+        } else {
+            guard let id = session?.selectedID else { return }
+            close()
+            model.perform(.open(id))
+        }
+    }
+
+    private func openSearchResult(_ result: SearchResult) {
         close()
-        model.perform(.open(id))
+        model.perform(.openSearchResult(result))
     }
 
     private func announceSelection() {
-        guard let id = session?.selectedID, let button = selectedButtons[id] else { return }
+        guard !hasQuery, let id = session?.selectedID, let button = selectedButtons[id] else { return }
         NSAccessibility.post(element: button, notification: .focusedUIElementChanged)
     }
 
@@ -225,6 +352,13 @@ final class SwitcherController: NSObject, NSWindowDelegate {
 private final class SwitcherPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        // field editor의 insertTab 시점에는 currentEvent가 바뀔 수 있으므로
+        // 전역 경로에서 처리한 Option+Tab은 창의 입력 경계에서 먼저 제외한다.
+        if event.type == .keyDown, event.keyCode == 48, event.modifierFlags.contains(.option) { return }
+        super.sendEvent(event)
+    }
 }
 
 @MainActor

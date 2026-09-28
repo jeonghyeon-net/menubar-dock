@@ -71,18 +71,20 @@ macOS Dock에 고정한 앱과 Finder는 시작할 때 자동으로 가져옵니
 ## 키보드로 선택하기
 
 <p align="center">
-  <img src="docs/assets/switcher.png" width="416" alt="Option+Tab으로 앱을 고르고 Enter로 여는 선택 패널">
+  <img src="docs/assets/switcher.png" width="420" alt="검색 입력창과 앱 아이콘을 함께 보여 주는 Option+Tab 선택 패널">
 </p>
 
 | 키 | 동작 |
 | --- | --- |
 | `Option+Tab` | 선택 패널 열기 또는 다음 앱 선택 |
 | `Shift+Option+Tab` | 이전 앱 선택 |
-| 방향키 | 패널 안에서 이동 |
-| `Enter` | 선택한 앱 열기 |
-| `Esc` | 취소 |
+| 방향키 | 앱 선택 이동. 검색 중에는 위·아래로 결과 선택 |
+| `Enter` | 선택한 앱 또는 검색 결과 열기 |
+| `Esc` | 검색어 지우기, 비어 있으면 닫기 |
 
 선택 패널에는 메뉴 막대의 최대 표시 개수와 관계없이 표시 대상 앱 전체가 나타납니다. Option 키를 놓아도 앱이 열리지 않습니다. Enter로 선택을 확정합니다. 패널의 톱니 버튼으로 설정을 열고 아래쪽에서 다음·이전 단축키를 바꿀 수 있습니다.
+
+패널에서 바로 입력하면 **Spotlight 인덱스의 앱·파일·폴더를 이름으로 검색**합니다. 입력을 지우면 기존 앱 선택으로 돌아옵니다. 별도 색인이나 외부 검색 서비스 없이 동작하며, 검색한 앱을 자동 고정하지 않습니다. 자세한 범위는 [Spotlight 검색](docs/user-guide.md#spotlight-검색)에 있습니다. 이 기능은 현재 `main`에 있으며 v1.0.3 배포본에는 포함되지 않습니다.
 
 ## 로컬 개발 명령
 
@@ -92,6 +94,7 @@ macOS Dock에 고정한 앱과 Finder는 시작할 때 자동으로 가져옵니
 | `mise run check` | 경고를 오류로 처리하는 빌드와 자동 테스트 |
 | `mise run input-check` | 실제 버튼 클릭·메뉴와 아이콘 크기별 렌더링 검사 |
 | `mise run settings-input-check` | 실제 슬라이더를 트랙 밖까지 드래그하며 떨림 검사 |
+| `mise run switcher-input-check` | 검색창 실제 입력·한글 조합·결과 선택·취소 검사 |
 | `mise run app` | `build/Menu Bar Dock.app` 생성 |
 | `mise run run` | 앱을 빌드한 뒤 실행 |
 | `mise run smoke` | 앱을 빌드한 뒤 실제 시작·설정 저장·정상 종료 검사 |
@@ -109,9 +112,9 @@ macOS Dock에 고정한 앱과 Finder는 시작할 때 자동으로 가져옵니
 Swift 6와 AppKit으로 구현하며 Apple Silicon용 `arm64` 앱 번들을 생성합니다.
 
 ```text
-DockDomain       앱 순서·고정·제외·표시 정책과 선택 세션
+DockDomain       앱 순서·고정·제외·표시 정책과 앱·검색 선택 세션
 DockPersistence  JSON 저장, 원자 교체, 손상 복구
-DockPlatform     앱 감지·실행·아이콘·로그인 항목
+DockPlatform     앱 감지·실행·아이콘·로그인 항목·Spotlight 검색
 DockShortcuts    전역 단축키 등록·저장·충돌 복구
 MenuBarDock      앱 수명, 유스케이스 조립, AppKit 화면
 ```
