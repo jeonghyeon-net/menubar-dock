@@ -1,7 +1,8 @@
 # 문서 이미지
 
 - `menu-bar-hero.png`: README 대표 이미지. 2026-09-28, macOS 27에서 실행한 Menu Bar Dock 1.0.3의 실제 메뉴 막대 영역을 캡처했다. 오른쪽에는 macOS의 일반 상태 항목도 보인다. 1210×78px 원본을 605px 너비로 표시해 Retina 해상도를 유지한다.
-- `settings.png`: 1.0.3의 실제 단일 설정 창. README에서는 접힌 영역 안에서 540px 너비로 표시한다.
+- `settings.png`: 1.0.4의 실제 설정 뷰를 시스템 앱 6개로 렌더링한 이미지. README에서는 접힌 영역 안에서 540px 너비로 표시한다. `./scripts/check-settings-input.sh --snapshot docs/assets/settings.png`로 다시 생성한다. 개인 설정이나 화면 배경을 포함하지 않는다.
+- `settings-1.0.3.png`: 1.0.3 검증 기록에 사용한 이전 단일 설정 창 캡처.
 - `switcher.png`: 앱 선택 패널 캡처. README의 단축키 설명에서 416px 너비로 표시한다.
 - `menu-bar.png`: 입력 검증 도구가 실제 시스템 버튼을 개별 렌더해 나란히 배치한 참고 이미지. 데스크톱 메뉴 막대 전체 캡처와 구별한다.
 - `appearance.png`: 1.0.2의 표시 설정 기록.

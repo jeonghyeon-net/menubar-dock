@@ -4,11 +4,11 @@
 
 ## 제품 계약
 
-사용자가 정한 순서를 유지하는 메뉴 막대 런처다. 고정 앱과 실행 중인 일반 앱의 합집합을 표시하며, 자동 추가는 설정으로 끌 수 있다. 앱 활성화는 순서를 바꾸지 않는다. 실행 중 점·밑줄·배지와 예약 공간은 없다.
+사용자가 정한 순서를 유지하는 메뉴 막대 런처다. 설정에는 **항상 표시할 앱** 단일 목록을 제공한다. 미등록 실행 앱을 앞쪽에, 등록 앱을 뒤쪽에 지정 순서대로 표시하며 두 그룹에 같은 앱을 중복 표시하지 않는다. 실행 앱 자동 표시는 설정으로 끌 수 있다. 앱 활성화는 각 그룹의 상대 순서를 바꾸지 않는다. 실행 중 점·밑줄·배지와 예약 공간은 없다.
 
 단축키는 Option+Tab / Shift+Option+Tab 이동, Enter 실행, Esc 취소다. Option을 놓아도 실행하지 않는다. 사용자가 조합을 변경할 수 있다. 이미 실행된 앱에는 표준 reopen/activate 요청을 보내고, 종료된 앱은 실행한다. 새 창의 디스플레이 강제 지정과 다른 앱 창 이동은 사용자 요청으로 제외했다.
 
-선택 패널의 검색은 `NSMetadataQuery`로 macOS Spotlight 인덱스를 읽는다. `SearchSession`은 검색어별 결과와 선택을 관리하고, `SpotlightSearchService`는 OS 조회·취소·결과 변환을 담당한다. `SwitcherController`는 입력창을 유지한 채 앱 전환과 검색 결과를 전환한다. 새 입력마다 이전 요청을 취소하고 요청 세대 번호도 비교하여 늦은 응답을 버린다. 한글 조합 중에는 검색과 실행을 보류하며, 검색 결과 열기는 `SearchResultOpener`를 통해 처리한다. 앱 catalog의 고정·순서·제외 상태는 검색으로 변경하지 않는다.
+선택 패널의 검색은 `NSMetadataQuery`로 macOS Spotlight 인덱스를 읽는다. `SearchSession`은 검색어별 결과와 선택을 관리하고, `SpotlightSearchService`는 OS 조회·취소·결과 변환을 담당한다. `SwitcherController`는 입력창을 유지한 채 앱 전환과 검색 결과를 전환한다. 새 입력마다 이전 요청을 취소하고 요청 세대 번호도 비교하여 늦은 응답을 버린다. 한글 조합 중에는 검색과 실행을 보류하며, 검색 결과 열기는 `SearchResultOpener`를 통해 처리한다. 검색 명령은 catalog의 등록·순서·제외 상태를 변경하지 않는다. 검색으로 새 앱을 실행했을 때의 Workspace 이벤트는 기존 자동 표시 정책을 따른다.
 
 직접 파일을 순회하거나 새 검색 DB를 만들지 않는다. 색인된 항목의 이름과 표시 이름만 검색하고 숨김 항목·앱 번들 내부를 제외한다. 결과는 작은 배치로 처리하며 입력·취소에 실행 기회를 돌려주고, 상위 50개만 유지한다. 검색어·결과를 영속화하지 않는다. 공개 API의 범위와 수명 관리는 [Apple의 NSMetadataQuery 문서](https://developer.apple.com/library/archive/documentation/Carbon/Conceptual/SpotlightQuery/Concepts/QueryingMetadata.html)를 따른다.
 
@@ -47,7 +47,7 @@ flowchart TD
 
 | 구성요소 | 책임 | 경계 |
 | --- | --- | --- |
-| DockCatalog aggregate | 설치 항목, 순서, 고정·제외 정책, 표시 투영, 이력 정리 | Foundation만 참조 |
+| DockCatalog aggregate | 설치 항목, 등록 순서, 실행 앱·등록 앱 표시 투영, 삭제·이력 정리 | Foundation만 참조 |
 | SwitcherSession | 시작 시 순서 고정, 순환 선택, 제거된 항목 조정 | UI·프로세스에 독립 |
 | ApplicationController | 이벤트 수신, 유스케이스, 저장 revision, 서비스 수명 | 유일한 영속 도메인 변경 지점 |
 | ConfigurationRepository | schema 검사, 원자 저장·백업·손상 원본 보존 | actor가 파일 작업 직렬화 |
@@ -60,9 +60,13 @@ flowchart TD
 
 ## 식별자와 순서
 
-`AppID`는 설치 항목의 영속 UUID다. PID·앱 이름·bundle identifier를 영속 ID로 쓰지 않는다. `AppEntry`에 bundle 경로·identifier·bookmark를 저장한다. 같은 identifier라도 다른 설치 경로이면 서로 다른 항목이다. 같은 정규 경로·identifier의 저장 중복은 처음 배치한 ID와 순서에 합치고, 고정·제외 정책과 최근 bookmark를 보존한다. bookmark로 이동한 앱을 복원하며, 경로를 잃으면 설정에서 다시 지정한다. 검증 가능한 앱 번들 URL이 없는 프로세스는 목록에 넣지 않는다.
+`AppID`는 설치 항목의 영속 UUID다. PID·앱 이름·bundle identifier를 영속 ID로 쓰지 않는다. `AppEntry`에 bundle 경로·identifier·bookmark를 저장한다. 같은 identifier라도 다른 설치 경로이면 서로 다른 항목이다. 같은 정규 경로·identifier의 저장 중복은 처음 배치한 ID와 순서에 합치고, 기존 등록·제외 정책과 최근 bookmark를 보존한다. bookmark로 이동한 앱을 복원하며, 경로를 잃으면 설정에서 다시 지정한다. `SavedAppRegistrar`는 위치 재지정 대상이 이미 임시 실행 항목에 있으면 기존 등록 ID와 순서를 유지해 병합한다. 검증 가능한 앱 번들 URL이 없는 프로세스는 목록에 넣지 않는다.
 
-`DockConfiguration`은 항목 목록과 독립적인 `order: [AppID]`를 갖는다. 새 항목은 끝에 추가하며 기존 항목의 상대 순서를 보존한다. 중복 이벤트로 고정·제외 상태를 덮지 않는다. 비고정·비실행·비제외 이력은 90일/256개 상한으로 정리하고 고정·제외·실행 항목은 보호한다. 삭제와 제외는 구별한다. 실행 중 앱도 삭제하면 목록에서 제거하고 별도 삭제 기록으로 자동 재발견을 막는다.
+`DockConfiguration`은 항목 목록과 독립적인 `order: [AppID]`를 갖는다. `savedApps`는 항상 표시하도록 등록했고 제외되지 않은 항목만 저장 순서대로 반환하며, 설정 목록은 이 투영을 사용한다. `visibleItems(runningIDs:)`는 저장 순서에 있는 미등록 실행 앱을 먼저, `savedApps`를 나중에 연결한다. 등록 앱은 실행 여부에 따라 그룹을 옮기지 않는다.
+
+`save(id)`는 미등록 항목을 등록 목록 끝에 추가한다. 이미 등록한 항목은 순서를 유지한다. `moveSaved(fromOffsets:toOffset:)`는 설정에 보이는 부분 목록의 인덱스로 이동하며, 미등록 이력의 상대 순서를 바꾸지 않는다. `+`와 아이콘 메뉴의 **목록에 추가**는 같은 등록 정책을 사용한다. 자동 감지와 활성화 이벤트는 기존 등록 순서를 덮지 않는다.
+
+이전 저장 파일과의 호환을 위해 `isPinned`·`isExcluded` 필드는 유지한다. 등록 상태는 `isPinned`, 과거 제외 상태는 `isExcluded`로 읽지만 화면에는 고정·표시 체크를 노출하지 않는다. 비고정·비실행·비제외 이력은 90일/256개 상한으로 정리하고 등록·제외·실행 항목은 보호한다. 실행 중 앱도 삭제하면 목록에서 제거하고 별도 삭제 기록으로 자동 재발견을 막는다. 과거 제외 항목과 삭제 항목은 사용자의 명시적인 `+` 복원 전까지 유지한다.
 
 실행 상태는 `RunningAppSnapshot`으로 분리한다. PID에 bundle URL과 launchDate를 함께 비교하여 PID가 재사용된 뒤 다른 프로세스를 숨기거나 종료하지 않는다. 모든 AppKit 작업은 MainActor에서 수행한다. 파일 저장은 actor에 보내고 늦은 revision을 거절한다.
 
@@ -78,7 +82,7 @@ WorkspaceMonitor는 runningApplications KVO와 실행·종료·활성화·숨김
 
 앱 하나가 독립된 `NSStatusItem`과 `NSStatusBarButton` 하나를 갖는다. 표준 버튼의 `.leftMouseUp` target/action이 그 슬롯의 AppID를 열기 명령으로 전달한다. `.rightMouseUp`과 Control-클릭은 그 버튼에 고정된 `NSMenu`를 열며 앱 실행 요청을 보내지 않는다. 합성 이미지, 부모 버튼 안의 자식 버튼, 클릭 좌표를 앱 ID로 변환하는 입력 처리는 사용하지 않는다.
 
-원본 Menu-Bar-Dock의 `MenuBarItem` / `MenuBarItems`처럼 물리적 슬롯과 앱 항목을 분리한다. 유효한 메뉴 막대 좌표가 모두 준비되면 슬롯을 왼쪽부터 정렬하고 저장된 도메인 순서를 대응시킨다. 초기 배치에는 슬롯 번호 순서를 사용한다. 각 슬롯의 autosaveName은 안정적으로 유지한다. 앱 수가 줄면 불필요한 상태 항목을 제거하며 길이 0인 예약 항목은 두지 않는다.
+원본 Menu-Bar-Dock의 `MenuBarItem` / `MenuBarItems`처럼 물리적 슬롯과 앱 항목을 분리한다. 유효한 메뉴 막대 좌표가 모두 준비되면 슬롯을 왼쪽부터 정렬하고 도메인의 최종 표시 순서를 대응시킨다. 초기 배치에는 슬롯 번호 순서를 사용한다. 각 슬롯의 autosaveName은 안정적으로 유지한다. 앱 수가 줄면 불필요한 상태 항목을 제거하며 길이 0인 예약 항목은 두지 않는다.
 
 기본 아이콘은 24pt(16–32pt), 추가 간격은 0pt(0–28pt)다. 원본의 custom image view와 표준 버튼의 렌더링 경계는 다르므로 원본의 40pt 수치를 그대로 사용하지 않는다. 이미지에는 요청한 크기를 그대로 적용한다. 표준 버튼이 이미지 크기에 맞춰 높이를 결정하므로 이전 버튼 높이를 크기의 상한으로 사용하지 않는다. 영역 너비는 아이콘 크기와 추가 간격의 합이다. 0pt에서는 앱이 여백을 추가하지 않으며 macOS가 각 독립 상태 항목에 붙이는 기본 여백은 남는다. 아이콘 크기를 바꿔도 추가 간격을 보존한다. 이미지 크기를 바꿀 때는 독립 복사본을 사용한다. 강제 aqua/darkAqua, 고정 대비 필터, 강제 active material을 사용하지 않는다. 표준 시스템 버튼이 외관과 입력을 담당한다.
 
@@ -88,9 +92,9 @@ WorkspaceMonitor는 runningApplications KVO와 실행·종료·활성화·숨김
 
 ## 키보드와 실행
 
-선택 패널은 생성 시 nonactivatingPanel 스타일을 고정한 NSPanel이다. 높이는 116pt이며 앱 아이콘과 현재 선택한 이름만 표시한다. 설정은 하단의 작은 톱니 버튼으로 연다. 둥근 layer와 함께 NSVisualEffectView.maskImage를 적용하여 배경 재질과 그림자도 같은 윤곽으로 자른다. [재질 마스크 계약](https://developer.apple.com/documentation/appkit/nsvisualeffectview/maskimage). 마우스가 있는 화면의 visibleFrame에 표시하며, 화면 구성 변경 시 닫는다. 타 앱 창 위치를 조사하지 않는다. [NSPanel 스타일](https://developer.apple.com/documentation/appkit/nswindow/stylemask-swift.struct/nonactivatingpanel).
+선택 패널은 생성 시 nonactivatingPanel 스타일을 고정한 NSPanel이다. 위쪽에 네이티브 검색창을 유지하고 아래에는 앱 아이콘과 선택 이름 또는 검색 결과 목록을 표시한다. 높이는 표시 중인 내용에 맞춰 조절한다. 앱 선택 화면의 작은 톱니 버튼으로 설정을 연다. 둥근 layer와 함께 NSVisualEffectView.maskImage를 적용하여 배경 재질과 그림자도 같은 윤곽으로 자른다. [재질 마스크 계약](https://developer.apple.com/documentation/appkit/nsvisualeffectview/maskimage). 마우스가 있는 화면의 visibleFrame에 표시하며, 화면 구성 변경 시 닫는다. 타 앱 창 위치를 조사하지 않는다. [NSPanel 스타일](https://developer.apple.com/documentation/appkit/nswindow/stylemask-swift.struct/nonactivatingpanel).
 
-세션이 열릴 때 목록 순서를 고정한다. 선택 도중 새 앱은 추가하지 않고 사라진 항목만 제거한다. 현재 앱이 없으면 정방향 첫 항목·역방향 마지막 항목부터 시작한다. 방향키·Tab도 이동하며 Return/keypad Enter는 선택, Escape는 취소한다. 전역 단축키와 패널 입력이 중복 이동하지 않도록 등록 조합은 전역 경로에서 처리한다.
+세션이 열릴 때 목록 순서를 고정한다. 선택 도중 새 앱은 추가하지 않고 사라진 항목만 제거한다. 현재 앱이 없으면 정방향 첫 항목·역방향 마지막 항목부터 시작한다. 방향키·Tab도 이동하며 Return/keypad Enter로 실행한다. 검색 중 좌우 방향키는 글자 커서를 움직이고, Escape는 검색어를 지운 뒤 비어 있는 상태에서 패널을 닫는다. 전역 단축키와 패널 입력이 중복 이동하지 않도록 등록 조합은 전역 경로에서 처리한다.
 
 Carbon에는 지정 조합 두 개만 등록한다. 설정 기록 동안 등록을 중지하고 재개하며, 충돌 때 이전 조합을 복구한다. 키를 누르는 동안에만 반복 타이머가 있고 release/suspend/stop 시 제거한다. 단축키 실패해도 마우스와 설정에 접근할 수 있다.
 
@@ -122,7 +126,7 @@ OSSignposter에 event-to-render, switcher-open, launch-request 구간을 남긴�
 
 ## 단일 설정 창과 슬라이더 입력
 
-설정에는 탭이나 카드 배경을 두지 않는다. 위쪽 앱 목록만 스크롤하고 아래쪽 크기·자동 표시·단축키와 하단 도움말을 한 창에서 사용한다. 기본 크기는 540×600pt다.
+설정에는 탭이나 카드 배경을 두지 않는다. 위쪽 **항상 표시할 앱** 목록만 스크롤하고 아래쪽 크기·자동 표시·단축키와 하단 도움말을 한 창에서 사용한다. 목록에는 앱 이름과 추가·제거·순서 이동 조작만 제공하며, 고정·표시 체크 열은 두지 않는다. 실행 중인 미등록 앱은 설정 목록에 넣지 않는다.
 
 슬라이더가 추적 중일 때는 저장값을 손잡이에 되쓰지 않는다. 손잡이는 AppKit이 추적하고 표시 레이블과 명령 값만 정수로 변환한다. 같은 값의 로그인·단축키 상태를 중복 게시하지 않아 불필요한 전체 설정 갱신도 줄인다.
 
@@ -130,9 +134,9 @@ OSSignposter에 event-to-render, switcher-open, launch-request 구간을 남긴�
 
 `SystemDockReader`는 com.apple.dock의 persistent-apps를 읽고 Finder와 설치된 로컬 앱 URL만 반환한다. `SystemDockMonitor`는 설정 파일과 부모 디렉터리의 변경 이벤트를 감시하여 원자 교체 뒤에도 갱신한다. 짧은 debounce와 실제 앱 목록 비교를 거치며 polling이나 Dock 파일 변경은 하지 않는다.
 
-`SystemDockCatalogImporter`는 같은 설치 경로·호환되는 identifier를 기존 ID에 연결한다. 새로 발견한 Dock 항목만 고정하며, `knownSystemDockPaths`를 저장하여 이후 사용자의 고정 해제를 되돌리지 않는다. 기존 순서·제외는 보존하고 새 항목만 Dock 순서대로 추가한다. 해석 실패한 경로는 성공 기록에서 제외하여 다음 시작·변경 이벤트 때 재시도한다.
+`SystemDockCatalogImporter`는 같은 설치 경로·호환되는 identifier를 기존 ID에 연결한다. `knownSystemDockPaths`를 기록하여 처음 발견한 Dock 항목만 등록 목록 끝에 Dock 순서대로 추가한다. 이전 버전의 등록 해제·제외와 현재 삭제 기록은 되돌리지 않는다. 이미 등록한 앱의 순서는 유지하며 macOS Dock에서 빠진 항목도 자동으로 제거하지 않는다. 해석 실패한 경로는 성공 기록에서 제외하여 다음 시작·변경 이벤트 때 재시도한다.
 
-`−`는 `apps`와 `order`에서 항목을 제거하고 `removedApps`에 삭제 기록을 보존한다. 자동 실행 감지와 Dock 동기화의 upsert는 같은 설치를 되살리지 않는다. `+`는 명시적 복원 명령으로 기존 ID를 재사용한다. 중복 항목 정리는 삭제 기록을 만들지 않는다. 세 필드는 기존 schema 2 파일에 없는 경우 기본값으로 읽는다.
+`−`는 `apps`와 `order`에서 항목을 제거하고 `removedApps`에 삭제 기록을 보존한다. 실행 앱과 Dock의 자동 감지는 삭제 기록의 bookmark로 이동한 설치 경로를 갱신한 뒤 병합하여, 앱 이동·재실행도 삭제를 되돌리지 않게 한다. `+`는 명시적 복원 명령으로 기존 ID를 재사용한다. 중복 항목 정리는 삭제 기록을 만들지 않는다. 세 필드는 기존 schema 2 파일에 없는 경우 기본값으로 읽는다.
 
 ## 릴리스 도구
 
