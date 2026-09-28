@@ -14,14 +14,14 @@
 | --- | --- |
 | 언어·플랫폼 | Swift 6 모드, Swift 6.2+, macOS 14+, arm64 |
 | 앱 수명 | NSApplicationDelegate, LSUIElement |
-| 메뉴 막대 | 단일 NSStatusItem, 표준 NSStatusBarButton.image |
+| 메뉴 막대 | 앱별 NSStatusItem과 NSStatusBarButton |
 | 설정·선택 | AppKit NSTabView / NSTableView / NSPanel |
 | OS 연동 | NSWorkspace, NSRunningApplication, SMAppService |
 | 단축키 | Carbon RegisterEventHotKey, 조합만 등록 |
 | 저장 | Codable JSON, actor, 원자 교체, 정상 백업 |
 | 진단 | OSLog Logger, OSSignposter |
 | 테스트 | Swift Testing, 주입 가능한 OS 경계, AppKit responder 테스트 |
-| 빌드·배포 | Swift Package, 앱 번들·DMG 스크립트, GitHub Actions |
+| 빌드·배포 | Swift Package, mise 로컬 검증, 앱 번들·DMG 스크립트 |
 | 업데이트 | 사용자가 요청할 때 GitHub Releases 확인 |
 
 외부 패키지 의존성은 없다. [빌드 결정](adr/0001-native-package-app.md), [AppKit·단축키 결정](adr/0002-appkit-and-system-hotkeys.md), [업데이트 결정](adr/0003-explicit-update-check.md)에 근거와 트레이드오프를 남겼다. Developer ID 인증서가 있으면 Hardened Runtime 서명과 공증을 수행할 수 있다. 인증서 없는 빌드는 ad-hoc 서명이다.
@@ -64,7 +64,7 @@ flowchart TD
 
 ## 시작·이벤트·종료
 
-설정 로드 → bookmark 복구 → UI controller 준비 → 관찰 시작·초기 스냅샷 → 최종 표시 목록 → status item 게시 순서다. 초기 빈 슬롯을 여러 개 생성하지 않는다. 시작 중 Finder 재실행 요청은 설정이 준비될 때 처리한다.
+설정 로드·v1 마이그레이션 → bookmark 복구 → UI controller 준비 → 관찰 시작·초기 스냅샷 → 최종 표시 목록 → 앱별 status item 게시 순서다. 초기 빈 슬롯을 여러 개 생성하지 않는다. 시작 중 Finder 재실행 요청은 설정이 준비될 때 처리한다.
 
 WorkspaceMonitor는 runningApplications KVO와 실행·종료·활성화·숨김·wake 알림을 사용한다. 활성화 알림 payload를 보존하고 accessor를 다시 읽어 덮지 않는다. 초기·wake 등에서 스냅샷을 조정하며 주기 polling은 없다. [실행 앱 KVO](https://developer.apple.com/documentation/appkit/nsworkspace/runningapplications), [종료 알림의 범위](https://developer.apple.com/documentation/appkit/nsworkspace/didterminateapplicationnotification).
 
@@ -72,31 +72,31 @@ WorkspaceMonitor는 runningApplications KVO와 실행·종료·활성화·숨김
 
 ## 메뉴 막대와 디스플레이
 
-하나의 NSStatusItem을 수명 동안 유지한다. autosaveName으로 macOS가 전체 항목 위치를 기억하고, 앱은 내부 순서만 관리한다. Command+drag는 전체 strip을 이동한다. 개별 순서는 설정에서 drag 또는 위·아래 버튼으로 바꾼다.
+앱 하나가 독립된 `NSStatusItem`과 `NSStatusBarButton` 하나를 갖는다. 표준 버튼의 `.leftMouseUp` target/action이 그 슬롯의 AppID를 열기 명령으로 전달한다. 합성 이미지, 부모 버튼 안의 자식 버튼, 클릭 좌표를 앱 ID로 변환하는 입력 처리는 사용하지 않는다.
 
-앱 아이콘을 1x/2x 이미지로 합성해 **표준 NSStatusBarButton.image**에 전달한다. 앱마다 status item을 만들거나 길이 0인 항목을 숨기지 않는다. 공유 NSImage의 크기를 변경하지 않는다. 앱이 없는 경우와 compact 모드는 glyph 하나이며, 초과 앱은 overflow 메뉴에 표시한다.
+원본 Menu-Bar-Dock의 `MenuBarItem` / `MenuBarItems`처럼 물리적 슬롯과 앱 항목을 분리한다. 유효한 메뉴 막대 좌표가 모두 준비되면 슬롯을 왼쪽부터 정렬하고 저장된 도메인 순서를 대응시킨다. 초기 배치에는 슬롯 번호 순서를 사용한다. 각 슬롯의 autosaveName은 안정적으로 유지한다. 앱 수가 줄면 불필요한 상태 항목을 제거하며 길이 0인 예약 항목은 두지 않는다.
 
-기본값은 아이콘 18pt, 간격 4pt, 끝 여백 합계 6pt, 최대 6개다. 실제 버튼 높이에 맞춰 icon 크기를 제한한다. 외관·배율·화면·접근성 표시 설정 변경 시 다시 그린다. 동일한 표시 상태의 알림은 건너뛰어 이미지 합성 자체가 appearance KVO를 다시 유발하는 렌더링 루프를 방지한다. 강제 aqua/darkAqua, 고정 대비 필터, 강제 active material을 사용하지 않는다. 시스템의 정상적인 비활성 dimming은 유지한다. [NSStatusItem](https://developer.apple.com/documentation/appkit/nsstatusitem).
+기본 아이콘은 40pt, 슬롯 너비는 30pt다. 원본 기본 크기를 기준으로 삼고 각각 설정에서 조절할 수 있다. 이미지 크기를 바꿀 때는 독립 복사본을 사용한다. 강제 aqua/darkAqua, 고정 대비 필터, 강제 active material을 사용하지 않는다. 표준 시스템 버튼이 외관과 입력을 담당한다.
 
-사용자 [회귀 참고 이미지](assets/inactive-display-reference.png)의 흰색 번짐과 청록색 편향은 실제 두 화면에서 비교해야 한다. 표준 렌더링 경로 채택만으로 그 현상이 해결됐다고 확정하지 않는다. 노치로 전체 항목이 가려질 수 있으므로 compact·표시 개수·Finder 재실행 설정 접근을 제공한다. `isVisible`은 가림 판정 수단이 아니다. [Apple 문서](https://developer.apple.com/documentation/appkit/nsstatusitem/isvisible).
+상단에는 앱 아이콘만 표시한다. 관리용 말줄임표나 런처 glyph는 없다. 표시 개수를 넘긴 앱은 Option+Tab 선택 패널에서 열고, 설정은 Finder에서 앱 재실행 또는 선택 패널의 톱니 버튼으로 연다. 앱이 없으면 상태 항목도 없다. 첫 실행은 설정을 열어 앱을 추가할 수 있게 한다.
 
-아이콘 rect를 AppID에 연결하고 mouse down의 ID와 mouse up의 ID가 일치할 때만 실행한다. 각 아이콘은 이름과 press/show-menu action을 갖는 접근성 버튼으로 노출한다.
+사용자 [회귀 참고 이미지](assets/inactive-display-reference.png)의 흰색 번짐과 청록색 편향은 두 화면에서 비교해야 한다. 외관 강제 지정을 제거한 것만으로 이 문제가 해결됐다고 확정하지 않는다. 노치나 메뉴 폭 때문에 항목이 가려지면 표시 개수를 줄이거나 키보드 선택 패널을 사용한다. `isVisible`은 가림 판정 수단이 아니다. [Apple 문서](https://developer.apple.com/documentation/appkit/nsstatusitem/isvisible).
 
 ## 키보드와 실행
 
-선택 패널은 생성 시 nonactivatingPanel 스타일을 고정한 NSPanel이다. 마우스가 있는 화면의 visibleFrame에 표시하며, 화면 구성 변경 시 닫는다. 타 앱 창 위치를 조사하지 않는다. [NSPanel 스타일](https://developer.apple.com/documentation/appkit/nswindow/stylemask-swift.struct/nonactivatingpanel).
+선택 패널은 생성 시 nonactivatingPanel 스타일을 고정한 NSPanel이다. 높이는 116pt이며 앱 아이콘과 현재 선택한 이름만 표시한다. 설정은 하단의 작은 톱니 버튼으로 연다. 둥근 layer와 함께 NSVisualEffectView.maskImage를 적용하여 배경 재질과 그림자도 같은 윤곽으로 자른다. [재질 마스크 계약](https://developer.apple.com/documentation/appkit/nsvisualeffectview/maskimage). 마우스가 있는 화면의 visibleFrame에 표시하며, 화면 구성 변경 시 닫는다. 타 앱 창 위치를 조사하지 않는다. [NSPanel 스타일](https://developer.apple.com/documentation/appkit/nswindow/stylemask-swift.struct/nonactivatingpanel).
 
 세션이 열릴 때 목록 순서를 고정한다. 선택 도중 새 앱은 추가하지 않고 사라진 항목만 제거한다. 현재 앱이 없으면 정방향 첫 항목·역방향 마지막 항목부터 시작한다. 방향키·Tab도 이동하며 Return/keypad Enter는 선택, Escape는 취소한다. 전역 단축키와 패널 입력이 중복 이동하지 않도록 등록 조합은 전역 경로에서 처리한다.
 
 Carbon에는 지정 조합 두 개만 등록한다. 설정 기록 동안 등록을 중지하고 재개하며, 충돌 때 이전 조합을 복구한다. 키를 누르는 동안에만 반복 타이머가 있고 release/suspend/stop 시 제거한다. 단축키 실패해도 마우스와 설정에 접근할 수 있다.
 
-ApplicationLauncher는 같은 설치 경로의 진행 중 요청을 합친다. NSWorkspace.openApplication에 `createsNewApplicationInstance=false`, `allowsRunningApplicationSubstitution=false`를 명시한다. 실행 중 앱에는 표준 reopen 후 unhide/activate를 요청한다. 다른 설치 위치가 반환되거나 활성화가 거절되면 오류를 전달한다. 사용자 의도 없는 재시도나 강제 focus 탈취는 없다. [OpenConfiguration](https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration).
+ApplicationLauncher는 같은 설치 경로의 진행 중 요청을 합친다. NSWorkspace.openApplication에 `createsNewApplicationInstance=false`, `allowsRunningApplicationSubstitution=false`를 명시한다. 신규·기존 앱 모두 activates=true인 표준 open/reopen 요청을 한 번 보낸다. 비활성 reopen 후 별도 activate를 보내던 경로는 제거했다. 다른 설치 위치가 반환되거나 OS가 실행을 거절하면 오류를 전달한다. 사용자 의도 없는 재시도나 강제 focus 탈취는 없다. [OpenConfiguration](https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration).
 
 앱 종료 Bool은 요청 수락 여부이며 실제 종료는 이벤트로 확인한다. 저장 대화상자로 종료가 취소되면 계속 실행 중인 앱이다. [terminate 계약](https://developer.apple.com/documentation/appkit/nsrunningapplication/terminate()).
 
 ## 저장·보안·배포
 
-`~/Library/Application Support/net.jeonghyeon.MenuBarDock/preferences.json`에 schema, 앱, order, 표시 설정을 저장한다. 단축키 조합만 UserDefaults에 단독 저장한다. 로그인 상태는 SMAppService에서 읽는다.
+`~/Library/Application Support/net.jeonghyeon.MenuBarDock/preferences.json`에 schema 2, 앱, order, 표시 설정을 저장한다. 단축키 조합만 UserDefaults에 단독 저장한다. 로그인 상태는 SMAppService에서 읽는다.
 
 - 파일은 원자 교체, 정상 백업, 오래된 revision 거부로 보호한다.
 - 손상 JSON은 별도 파일로 보존하고 백업 또는 기본값으로 복구한다.
@@ -114,4 +114,4 @@ ApplicationLauncher는 같은 설치 경로의 진행 중 요청을 합친다. N
 
 OSSignposter에 event-to-render, switcher-open, launch-request 구간을 남긴다. Release 앱에서 idle CPU·메모리·키 입력 지연을 측정하며 타 앱의 시작 시간과 우리 요청 전달 시간을 구분한다. Instruments 장시간 사용, 실제 두 화면/Spaces/로그인 부팅 검증은 자동 단위 테스트와 별도다.
 
-소스는 Sources의 다섯 모듈, Tests의 대응 테스트, Config/Info.plist, scripts, docs로 구성한다. 프로젝트는 main 하나로 운영하며 CI가 빌드·테스트·패키징·번들 self-test를 수행한다.
+소스는 Sources의 다섯 모듈, Tests의 대응 테스트, Config/Info.plist, scripts, docs로 구성한다. 프로젝트는 main 하나로 운영한다. GitHub Actions는 사용하지 않으며 mise 또는 Makefile의 명시적인 로컬 명령으로 빌드·테스트·패키징·번들 self-test를 수행한다.

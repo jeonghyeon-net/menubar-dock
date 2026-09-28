@@ -40,7 +40,7 @@ Mach-O universal binary: x86_64 + arm64
 
 [`MenuBarItems.swift`](https://github.com/EthanSK/Menu-Bar-Dock/blob/ffc13de58ec40d3dab913ca36cc1155f24a68099/MenuBarDock/MenuBarItems.swift#L38)의 주석에는 길이 0인 항목 때문에 빈 간격이 남고, visibility를 끄면 위치 복원이 깨진다는 문제가 기록돼 있다. 같은 파일은 실제 화면 좌표로 항목을 정렬하고 여분 항목을 유지한다.
 
-새 설계는 status item 한 개 안에 배열을 배치한다. 저장 순서와 화면 레이아웃을 분리하고, 항목 수와 정확히 일치하는 폭만 사용한다. 사용자 증상과 구조가 부합하지만, 첫 부팅 증상의 정확한 재현 원인을 확정한 것은 아니다.
+초기 구현은 이를 피하려고 상태 항목 하나에 여러 앱을 묶었으나 실제 클릭과 표시가 사용자 기대에 맞지 않았다. 이 구현은 폐기했다. 최종 구현은 원본처럼 앱별 독립 status item을 사용하고, 실제 슬롯 위치와 저장된 앱 순서를 대응시킨다. 다만 여분 슬롯과 길이 0 숨김은 유지하지 않고 실제 표시 개수만 생성한다.
 
 ### 비활성 디스플레이 외관
 
@@ -62,7 +62,7 @@ Mach-O universal binary: x86_64 + arm64
 
 [`RunningApp.swift`](https://github.com/EthanSK/Menu-Bar-Dock/blob/ffc13de58ec40d3dab913ca36cc1155f24a68099/MenuBarDock/RunningApp.swift#L13)는 URL 문자열 또는 공통 `UNKNOWN`을 ID로 사용한다. [`OpenableApp.swift`](https://github.com/EthanSK/Menu-Bar-Dock/blob/ffc13de58ec40d3dab913ca36cc1155f24a68099/MenuBarDock/OpenableApp.swift#L141)의 일반 실행 경로는 callback 오류를 사용하지 않는다.
 
-새 설계는 설치 ID와 프로세스 ID를 분리하고 launch/activation 결과를 각각 추적한다. 새 앱의 실행 화면 지정은 사용자 요청으로 제외했으며, 기존/새 앱 모두 창 위치를 직접 조정하지 않는다.
+새 설계는 설치 ID와 프로세스 ID를 분리한다. 원본 기본값인 launch 경로와 같이 NSWorkspace.openApplication에 activates=true를 전달한다. 실행 중 앱도 같은 reopen 경로를 사용하며, 실패는 사용자에게 알린다. 새 앱의 실행 화면 지정은 사용자 요청으로 제외했으며, 기존/새 앱 모두 창 위치를 직접 조정하지 않는다.
 
 ## 재사용 원칙
 

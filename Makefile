@@ -1,4 +1,4 @@
-.PHONY: build test app package run clean check smoke
+.PHONY: build test app package run clean check smoke input-check
 
 build:
 	swift build
@@ -9,6 +9,10 @@ test:
 check:
 	swift build -Xswiftc -warnings-as-errors
 	./scripts/test.sh
+	./scripts/check-status-input.sh
+
+input-check:
+	./scripts/check-status-input.sh
 
 app:
 	./scripts/build-app.sh

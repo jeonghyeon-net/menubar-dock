@@ -4,7 +4,7 @@
 
 - `AppID`: String rawValue, Hashable/Codable/Sendable, 기본 생성자는 UUID. `init(rawValue:)`.
 - `AppEntry`: Identifiable/Codable/Equatable/Sendable. public var `id: AppID`, `name: String`, `bundleIdentifier: String?`, `bundlePath: String`, `bookmarkData: Data?`, `isPinned: Bool`, `isExcluded: Bool`, `lastSeen: Date`.
-- `DockPreferences`: Codable/Equatable/Sendable. public var `iconSize: Double = 18`, `iconSpacing: Double = 4`, `maxVisibleApps: Int = 6`, `showsRunningApps: Bool = true`, `isCompact: Bool = false`, `shortcutEnabled: Bool = true`. 검증/정규화 제공.
+- `DockPreferences`: Codable/Equatable/Sendable. public var `iconSize: Double = 40`, `slotWidth: Double = 30`, `maxVisibleApps: Int = 6`, `showsRunningApps: Bool = true`, `shortcutEnabled: Bool = true`. 검증/정규화 제공.
 - `DockConfiguration`: Codable/Equatable/Sendable. `schemaVersion: Int`, `apps: [AppEntry]`, `order: [AppID]`, `preferences: DockPreferences`. 기본 생성자. 중복·범위 정규화.
 - `DockItem`: Equatable/Sendable/Identifiable. `app: AppEntry`, `isRunning: Bool`, id는 app.id.
 - `DockCatalog`: 값 타입 aggregate. `configuration: DockConfiguration`, init(configuration:), upsert(AppEntry), pin(AppID, Bool), exclude(AppID, Bool), remove(AppID), move(fromOffsets: IndexSet, toOffset: Int), updatePreferences(DockPreferences), orderedApps, visibleItems(runningIDs: Set<AppID>). 순서 불변식 보장.

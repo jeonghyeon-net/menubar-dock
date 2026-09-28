@@ -1,0 +1,66 @@
+# Swift와 macOS SDK는 xcode-select로 선택된 Xcode 또는 Command Line Tools를 사용한다.
+# 개발 명령만 묶으며 푸시나 커밋을 계기로 작업을 실행하지 않는다.
+
+[tasks.toolchain]
+description = "선택된 Swift 버전과 Apple 개발 도구 경로 확인"
+run = '''
+xcrun swift --version
+xcode-select -p
+'''
+
+[tasks.build]
+description = "개발용 실행 파일 빌드"
+run = "swift build"
+
+[tasks.test]
+description = "Swift Testing 실행; -- 뒤에 --filter 등 테스트 옵션 전달"
+run = "./scripts/test.sh"
+
+[tasks.check]
+description = "경고를 오류로 처리하는 빌드 후 자동 테스트"
+run = '''
+set -eu
+swift build -Xswiftc -warnings-as-errors
+./scripts/test.sh
+./scripts/check-status-input.sh
+'''
+
+[tasks."input-check"]
+description = "독립 메뉴 막대 버튼의 실제 AppKit 마우스 이벤트 경로 검증"
+run = "./scripts/check-status-input.sh"
+
+[tasks.app]
+description = "arm64 Release 앱 번들 생성"
+run = "./scripts/build-app.sh"
+
+[tasks.run]
+description = "앱 번들을 빌드한 뒤 실행"
+run = '''
+set -eu
+./scripts/build-app.sh
+open "build/Menu Bar Dock.app"
+'''
+
+[tasks."self-test"]
+description = "이미 빌드한 앱 번들의 식별자와 리소스 검사"
+run = '"build/Menu Bar Dock.app/Contents/MacOS/MenuBarDock" --self-test'
+
+[tasks.smoke]
+description = "앱 빌드 후 실제 시작·설정 저장·정상 종료 검사"
+run = '''
+set -eu
+./scripts/build-app.sh
+./scripts/smoke-test.sh
+'''
+
+[tasks.package]
+description = "앱 ZIP·DMG·SHA-256 체크섬 생성"
+run = "./scripts/package.sh"
+
+[tasks.notarize]
+description = "준비된 Developer ID 인증서와 키체인 프로필로 서명·공증"
+run = "./scripts/notarize.sh"
+
+[tasks.clean]
+description = "SwiftPM 빌드 캐시 정리"
+run = "swift package clean"
