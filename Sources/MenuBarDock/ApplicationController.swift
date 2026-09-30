@@ -42,10 +42,13 @@ final class ApplicationController {
     private var switcher: SwitcherController?
     private var settings: SettingsWindowController?
     private let spotlightShortcut = SpotlightShortcutOverride()
-    private lazy var shortcuts = GlobalShortcutService(prepareRegistration: { [spotlightShortcut] bindings in
-        guard bindings.contains(where: { $0.hasSameCombination(as: .forwardDefault) }) else { return {} }
-        return try spotlightShortcut.prepare()
-    }) { [weak self] direction in self?.cycle(direction) }
+    private lazy var shortcuts: GlobalShortcutService? = {
+        guard allowsGlobalShortcuts else { return nil }
+        return GlobalShortcutService(prepareRegistration: { [spotlightShortcut] bindings in
+            guard bindings.contains(where: { $0.hasSameCombination(as: .forwardDefault) }) else { return {} }
+            return try spotlightShortcut.prepare()
+        }) { [weak self] direction in self?.cycle(direction) }
+    }()
 
     init(
         directory: URL, readSystemDock: (() throws -> [URL])? = nil,
@@ -141,11 +144,9 @@ final class ApplicationController {
         if presentation.preferences != catalog.configuration.preferences {
             presentation.preferences = catalog.configuration.preferences
         }
-        if allowsGlobalShortcuts {
-            do { try shortcuts.setEnabled(catalog.configuration.preferences.shortcutEnabled) }
-            catch { presentation.notice = error.localizedDescription }
-            refreshShortcutLabels()
-        }
+        do { try shortcuts?.setEnabled(catalog.configuration.preferences.shortcutEnabled) }
+        catch { presentation.notice = error.localizedDescription }
+        refreshShortcutLabels()
         refreshLoginStatus()
     }
 
@@ -212,17 +213,17 @@ final class ApplicationController {
         case .dismissNotice: presentation.notice = nil
         case .checkForUpdates: checkForUpdates()
         case .shortcut(let action, let binding):
-            do { try shortcuts.setBinding(binding, for: action) }
+            do { try shortcuts?.setBinding(binding, for: action) }
             catch { presentation.notice = error.localizedDescription }
             refreshShortcutLabels()
         case .suspendShortcuts(let suspended):
-            do { try shortcuts.suspend(suspended) }
+            do { try shortcuts?.suspend(suspended) }
             catch { presentation.notice = error.localizedDescription }
         case .resetShortcuts:
-            do { try shortcuts.reset() }
+            do { try shortcuts?.reset() }
             catch { presentation.notice = error.localizedDescription }
             refreshShortcutLabels()
-        case .cancelShortcutPress: shortcuts.cancelCurrentPress()
+        case .cancelShortcutPress: shortcuts?.cancelCurrentPress()
         }
     }
 
@@ -317,7 +318,7 @@ final class ApplicationController {
     func saveBeforeTermination(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
         // 종료 저장 중에는 새 이벤트가 더 최신 상태를 만들지 못하도록 동결한다.
         isTerminating = true
-        shortcuts.cancelCurrentPress()
+        shortcuts?.cancelCurrentPress()
         switcher?.close()
         saveTask?.cancel()
         revision &+= 1
@@ -348,7 +349,7 @@ final class ApplicationController {
         started = false
         monitor.stop()
         systemDockMonitor?.stop()
-        if allowsGlobalShortcuts { shortcuts.stop() }
+        shortcuts?.stop()
         statusItem?.tearDown()
         statusItem = nil
         switcher?.tearDown()
@@ -397,6 +398,7 @@ final class ApplicationController {
     }
 
     private func refreshShortcutLabels() {
+        guard let shortcuts else { return }
         let forward = shortcuts.binding(for: .forward).displayName
         let backward = shortcuts.binding(for: .backward).displayName
         presentation.shortcutBindings = ShortcutAction.allCases.map { shortcuts.binding(for: $0) }
