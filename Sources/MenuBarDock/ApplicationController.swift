@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 final class ApplicationController {
     private var catalog = DockCatalog()
     private let repository: ConfigurationRepository
+    private let allowsGlobalShortcuts: Bool
     private let readSystemDock: () throws -> [URL]
     private let systemDockMonitor: SystemDockMonitor?
     private let monitor = WorkspaceMonitor()
@@ -40,13 +41,19 @@ final class ApplicationController {
     private var statusItem: StatusItemController?
     private var switcher: SwitcherController?
     private var settings: SettingsWindowController?
-    private lazy var shortcuts = GlobalShortcutService { [weak self] direction in self?.cycle(direction) }
+    private let spotlightShortcut = SpotlightShortcutOverride()
+    private lazy var shortcuts = GlobalShortcutService(prepareRegistration: { [spotlightShortcut] bindings in
+        guard bindings.contains(where: { $0.hasSameCombination(as: .forwardDefault) }) else { return {} }
+        return try spotlightShortcut.prepare()
+    }) { [weak self] direction in self?.cycle(direction) }
 
     init(
         directory: URL, readSystemDock: (() throws -> [URL])? = nil,
+        allowsGlobalShortcuts: Bool = true,
         openSearchResult: (@MainActor (SearchResult) async throws -> Void)? = nil
     ) {
         repository = ConfigurationRepository(directory: directory)
+        self.allowsGlobalShortcuts = allowsGlobalShortcuts
         self.readSystemDock = readSystemDock ?? { try SystemDockReader().applicationURLs() }
         systemDockMonitor = readSystemDock == nil ? SystemDockMonitor() : nil
         let opener = SearchResultOpener()
@@ -134,9 +141,11 @@ final class ApplicationController {
         if presentation.preferences != catalog.configuration.preferences {
             presentation.preferences = catalog.configuration.preferences
         }
-        do { try shortcuts.setEnabled(catalog.configuration.preferences.shortcutEnabled) }
-        catch { presentation.notice = error.localizedDescription }
-        refreshShortcutLabels()
+        if allowsGlobalShortcuts {
+            do { try shortcuts.setEnabled(catalog.configuration.preferences.shortcutEnabled) }
+            catch { presentation.notice = error.localizedDescription }
+            refreshShortcutLabels()
+        }
         refreshLoginStatus()
     }
 
@@ -339,7 +348,7 @@ final class ApplicationController {
         started = false
         monitor.stop()
         systemDockMonitor?.stop()
-        shortcuts.stop()
+        if allowsGlobalShortcuts { shortcuts.stop() }
         statusItem?.tearDown()
         statusItem = nil
         switcher?.tearDown()
@@ -390,6 +399,7 @@ final class ApplicationController {
     private func refreshShortcutLabels() {
         let forward = shortcuts.binding(for: .forward).displayName
         let backward = shortcuts.binding(for: .backward).displayName
+        presentation.shortcutBindings = ShortcutAction.allCases.map { shortcuts.binding(for: $0) }
         if presentation.forwardShortcut != forward { presentation.forwardShortcut = forward }
         if presentation.backwardShortcut != backward { presentation.backwardShortcut = backward }
     }

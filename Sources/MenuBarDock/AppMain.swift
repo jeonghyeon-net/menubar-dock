@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .appendingPathComponent("net.jeonghyeon.MenuBarDock", isDirectory: true)
         }
         let firstLaunch = !FileManager.default.fileExists(atPath: directory.appendingPathComponent("preferences.json").path)
-        let controller = ApplicationController(directory: directory)
+        let controller = ApplicationController(directory: directory, allowsGlobalShortcuts: !arguments.contains("--smoke-test"))
         self.controller = controller
         starting = Task {
             await controller.start(showSettings: firstLaunch || arguments.contains("--show-settings"))

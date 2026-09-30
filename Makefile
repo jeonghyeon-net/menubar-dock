@@ -1,4 +1,4 @@
-.PHONY: build test app package run clean check smoke input-check settings-input-check switcher-input-check version release-test package-test release-plan release-prepare release
+.PHONY: build test app package run clean check smoke input-check settings-input-check switcher-input-check global-shortcut-check version release-test package-test release-plan release-prepare release
 
 build:
 	swift build
@@ -17,6 +17,9 @@ settings-input-check:
 
 switcher-input-check:
 	./scripts/check-switcher-input.sh
+
+global-shortcut-check:
+	./scripts/check-switcher-input.sh --global-shortcuts
 
 app:
 	./scripts/build-app.sh

@@ -72,6 +72,10 @@ run = "./scripts/check-switcher-input.sh"
 description = "Git 태그에서 현재 또는 다음 패치 버전 계산"
 run = "./scripts/version.sh"
 
+[tasks."global-shortcut-check"]
+description = "Spotlight 설정 해제와 System Events의 실제 전역 ⌘ Space 입력 검사"
+run = "./scripts/check-switcher-input.sh --global-shortcuts"
+
 [tasks."version-test"]
 description = "버전 계산과 릴리스 메타데이터 회귀 검사"
 run = "./scripts/test-release-metadata.sh"

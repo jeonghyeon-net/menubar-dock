@@ -313,7 +313,7 @@ private final class AppearanceSettingsPage: NSView {
         count.action = #selector(changeCount)
         count.setAccessibilityLabel("최대 표시 개수")
         count.controlSize = .small
-        count.toolTip = "나머지 앱은 Option+Tab으로 선택합니다."
+        count.toolTip = "나머지 앱은 키보드 선택 패널에서 선택합니다. 기본 단축키는 ⌘ Space입니다."
         count.widthAnchor.constraint(equalToConstant: 82).isActive = true
         iconLabel.alignment = .right
         spacingLabel.alignment = .right
@@ -425,6 +425,7 @@ private final class ShortcutSettingsPage: NSView {
         addFullWidth(formRow("다음 앱 선택", control: forward), to: content)
         addFullWidth(formRow("이전 앱 선택", control: backward), to: content)
         addFullWidth(label("← → 이동 · Enter 열기 · Esc 취소", secondary: true), to: content)
+        addFullWidth(label("⌘ Space 사용 시 macOS의 Spotlight 단축키를 해제합니다.", secondary: true), to: content)
     }
 
     @available(*, unavailable)

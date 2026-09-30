@@ -17,10 +17,10 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
     }
 
     public static let forwardDefault = ShortcutBinding(
-        keyCode: 48, modifiers: UInt64(NSEvent.ModifierFlags.option.rawValue), character: "⇥"
+        keyCode: 49, modifiers: UInt64(NSEvent.ModifierFlags.command.rawValue), character: "Space"
     )
     public static let backwardDefault = ShortcutBinding(
-        keyCode: 48, modifiers: UInt64(NSEvent.ModifierFlags([.option, .shift]).rawValue), character: "⇥"
+        keyCode: 49, modifiers: UInt64(NSEvent.ModifierFlags([.command, .shift]).rawValue), character: "Space"
     )
 
     public var displayName: String {
@@ -54,7 +54,10 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
               modifiers & ~Self.supportedModifiers == 0
         else { throw ShortcutError.invalidCombination }
         // 앱 전환/종료/강제 종료/화면 잠금과 같은 시스템 기본 조합은 가로채지 않는다.
-        if flags.contains(.command), [12, 13, 4, 46, 48, 49, 53].contains(keyCode) {
+        if flags.contains(.command), [12, 13, 4, 46, 48, 53].contains(keyCode) {
+            throw ShortcutError.reservedCombination
+        }
+        if keyCode == 49, flags.contains(.command), flags != .command, flags != [.command, .shift] {
             throw ShortcutError.reservedCombination
         }
         if flags == .control, [49, 123, 124, 125, 126].contains(keyCode) {
@@ -62,8 +65,13 @@ public struct ShortcutBinding: Codable, Equatable, Sendable {
         }
     }
 
-    func hasSameCombination(as other: Self) -> Bool {
+    public func hasSameCombination(as other: Self) -> Bool {
         keyCode == other.keyCode && modifiers == other.modifiers
+    }
+
+    public func matches(_ event: NSEvent) -> Bool {
+        keyCode == UInt32(event.keyCode)
+            && modifiers == UInt64(event.modifierFlags.rawValue) & Self.supportedModifiers
     }
 
     private static let supportedModifiers = UInt64(NSEvent.ModifierFlags([.command, .control, .option, .shift]).rawValue)

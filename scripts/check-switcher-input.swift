@@ -1,6 +1,7 @@
 import AppKit
 import DockDomain
 import DockPlatform
+import DockShortcuts
 
 /// 외부 앱을 열지 않고 제품 창의 field editor와 이벤트 큐를 사용한다.
 @main
@@ -49,6 +50,10 @@ private final class SearchInputProbe {
     private var openedApps: [AppID] { actions.compactMap { if case let .open(id) = $0 { id } else { nil } } }
 
     func run() async throws {
+        if CommandLine.arguments.contains("--global-shortcuts") {
+            try await checkGlobalShortcuts()
+            exit(0)
+        }
         model.apps = entries
         model.items = entries.map { DockItem(app: $0, isRunning: false) }
         try await show()
@@ -72,10 +77,13 @@ private final class SearchInputProbe {
         try await key(124, characters: "\u{f703}")
         require(editor().selectedRange().location == caret, "오른쪽 키가 검색어 caret을 복원하지 않음")
         require(table().selectedRow == 1, "오른쪽 키가 검색 결과 선택을 변경함")
-        // 전역 단축키에 해당하는 이동 1회 뒤 로컬 Option+Tab이 다시 이동하면 실패한다.
+        // 전역 이동 뒤 로컬 ⌘ Space가 선택을 다시 옮기거나 공백을 입력하면 실패한다.
         switcher.advance(direction: 1)
-        try await key(48, characters: "\t", flags: .option)
-        require(table().selectedRow == 2, "Option+Tab이 전역 처리와 중복 이동함: 선택 \(table().selectedRow)")
+        try await key(49, characters: " ", flags: .command)
+        require(table().selectedRow == 2 && field().stringValue == "r", "⌘ Space가 중복 이동하거나 검색어에 공백을 입력함")
+        switcher.advance(direction: -1)
+        try await key(49, characters: " ", flags: [.command, .shift])
+        require(table().selectedRow == 1 && field().stringValue == "r", "⇧⌘ Space가 중복 이동하거나 검색어를 변경함")
         search.deliver([results[0]], request: 0)
         try await clickEmptyResultsArea()
         require(window?.firstResponder === originalEditor, "검색 결과 빈 영역 클릭 후 입력 포커스 상실")
@@ -126,7 +134,7 @@ private final class SearchInputProbe {
         require(field().stringValue == "ㅎ", "한글 조합 확정 뒤 검색어 불일치")
         try await settleSearch("ㅎ", count: requestsBeforeComposition + 1)
         switcher.tearDown()
-        print("통과: 앱 아이콘·15pt 이름 한 줄·실제 검색 입력·포커스 유지·빈 영역 클릭·caret·방향키·Enter·Esc·Option+Tab 중복 방지·늦은 응답·창 재개·한글 조합 확정 후 검색")
+        print("통과: 앱 아이콘·15pt 이름 한 줄·실제 검색 입력·포커스 유지·빈 영역 클릭·caret·방향키·Enter·Esc·⌘ Space 양방향 중복·공백 방지·늦은 응답·창 재개·한글 조합 확정 후 검색")
         exit(0)
     }
 
@@ -139,6 +147,39 @@ private final class SearchInputProbe {
             guard let window, let editor = field().currentEditor() as? NSTextView else { return false }
             return window.isKeyWindow && NSApp.keyWindow === window && window.firstResponder === editor
         }
+    }
+
+    private func checkGlobalShortcuts() async throws {
+        let domain = "net.jeonghyeon.MenuBarDock.GlobalInputCheck.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: domain) else { fail("단축키 검사 저장소 생성 실패") }
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let override = SpotlightShortcutOverride()
+        var cycles: [Int] = []
+        let shortcuts = GlobalShortcutService(defaults: defaults, prepareRegistration: { _ in try override.prepare() }) {
+            cycles.append($0)
+        }
+        defer { shortcuts.stop() }
+        try shortcuts.setEnabled(true)
+        for (index, modifiers) in ["command down", "{command down, shift down}", "command down"].enumerated() {
+            // AppKit의 로컬 큐 대신 System Events로 WindowServer의 전역 입력 경로를 통과한다.
+            let status = try await Task.detached {
+                let sender = Process()
+                sender.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                sender.arguments = ["-e", "tell application \"System Events\" to key code 49 using \(modifiers)"]
+                try sender.run()
+                sender.waitUntilExit()
+                return sender.terminationStatus
+            }.value
+            require(status == 0, "System Events 키 입력 전송 실패")
+            try await waitUntil("전역 단축키 \(index + 1)회 전달") { cycles.count >= index + 1 }
+            try await Task.sleep(for: .milliseconds(120))
+            require(cycles.count == index + 1, "키를 놓은 뒤 중복 또는 반복 입력 발생")
+        }
+        require(cycles == [1, -1, 1], "⌘ Space 정방향·역방향 순서 불일치")
+        try shortcuts.suspend(true)
+        try shortcuts.suspend(false)
+        shortcuts.stop()
+        print("통과: Spotlight 설정 자동 해제·실제 Carbon 전역 ⌘ Space/⇧⌘ Space 입력·키 해제·기록 중지/복구·등록 해제")
     }
 
     private func field() -> NSSearchField {

@@ -14,11 +14,13 @@ public final class GlobalShortcutService {
     private struct Preferences: Codable {
         var forward: ShortcutBinding = .forwardDefault
         var backward: ShortcutBinding = .backwardDefault
+        var defaultsVersion: Int? = 2
     }
 
     private let defaults: UserDefaults
     private let backend: any ShortcutRegistering
     private let onCycle: (Int) -> Void
+    private let prepareRegistration: ([ShortcutBinding]) throws -> (() throws -> Void)
     private var preferences: Preferences
     private var isEnabled = false
     private var isSuspended = false
@@ -30,17 +32,36 @@ public final class GlobalShortcutService {
     private var terminationObserver: NSObjectProtocol?
     private static let preferencesKey = "global-shortcuts.v1"
 
-    public convenience init(defaults: UserDefaults = .standard, onCycle: @escaping (Int) -> Void) {
-        self.init(defaults: defaults, backend: CarbonShortcutBackend(), onCycle: onCycle)
+    public convenience init(
+        defaults: UserDefaults = .standard,
+        prepareRegistration: @escaping ([ShortcutBinding]) throws -> (() throws -> Void) = { _ in {} },
+        onCycle: @escaping (Int) -> Void
+    ) {
+        self.init(defaults: defaults, backend: CarbonShortcutBackend(), prepareRegistration: prepareRegistration, onCycle: onCycle)
     }
 
-    init(defaults: UserDefaults, backend: any ShortcutRegistering, onCycle: @escaping (Int) -> Void) {
+    init(
+        defaults: UserDefaults, backend: any ShortcutRegistering,
+        prepareRegistration: @escaping ([ShortcutBinding]) throws -> (() throws -> Void) = { _ in {} },
+        onCycle: @escaping (Int) -> Void
+    ) {
         self.defaults = defaults
         self.backend = backend
         self.onCycle = onCycle
+        self.prepareRegistration = prepareRegistration
         if let data = defaults.data(forKey: Self.preferencesKey),
-           let saved = try? JSONDecoder().decode(Preferences.self, from: data),
+           var saved = try? JSONDecoder().decode(Preferences.self, from: data),
            (try? Self.validate(saved)) != nil {
+            if saved.defaultsVersion == nil {
+                let oldForward = ShortcutBinding(keyCode: 48, modifiers: UInt64(NSEvent.ModifierFlags.option.rawValue), character: "⇥")
+                let oldBackward = ShortcutBinding(keyCode: 48, modifiers: UInt64(NSEvent.ModifierFlags([.option, .shift]).rawValue), character: "⇥")
+                // 두 방향 모두 이전 기본값인 경우만 옮겨 사용자 지정 조합을 보존한다.
+                if saved.forward.hasSameCombination(as: oldForward), saved.backward.hasSameCombination(as: oldBackward) {
+                    saved = Preferences()
+                }
+                saved.defaultsVersion = 2
+                if let encoded = try? JSONEncoder().encode(saved) { defaults.set(encoded, forKey: Self.preferencesKey) }
+            }
             preferences = saved
         } else {
             preferences = Preferences()
@@ -170,6 +191,7 @@ public final class GlobalShortcutService {
     }
 
     private func register(_ preferences: Preferences) throws {
+        let rollbackSystemSettings = try prepareRegistration([preferences.forward, preferences.backward])
         do {
             try backend.register(preferences.forward, action: .forward)
             try backend.register(preferences.backward, action: .backward)
@@ -177,6 +199,8 @@ public final class GlobalShortcutService {
         } catch {
             backend.unregisterAll()
             hasRegistrations = false
+            do { try rollbackSystemSettings() }
+            catch { throw ShortcutError.rollbackFailed }
             throw error
         }
     }
@@ -250,9 +274,26 @@ private final class CarbonShortcutBackend: ShortcutRegistering {
         // 비독점 등록은 타 앱의 독점 등록에 가려져도 성공하므로 충돌을 감지할 수 없다.
         let status = RegisterEventHotKey(
             binding.keyCode, Self.carbonModifiers(binding.modifiers), keyID,
-            GetApplicationEventTarget(), OptionBits(kEventHotKeyExclusive), &reference
+            GetEventDispatcherTarget(), OptionBits(kEventHotKeyExclusive), &reference
         )
-        guard status == noErr, let reference else { throw ShortcutError.registrationFailed(status) }
+        // Spotlight를 시스템 설정에서 해제해도 macOS가 조합의 독점권을 유지할 수 있다.
+        // 해당 기본 조합만 일반 등록을 허용하며 나머지 키의 충돌 검사는 유지한다.
+        var result = status
+        if status == eventHotKeyExistsErr, binding.hasSameCombination(as: .forwardDefault) {
+            var hotkeys: Unmanaged<CFArray>?
+            let copied = CopySymbolicHotKeys(&hotkeys)
+            let values = hotkeys?.takeRetainedValue() as? [[String: Any]]
+            let systemUsesCommandSpace = values?.contains {
+                ($0[kHISymbolicHotKeyCode as String] as? UInt32) == binding.keyCode
+                    && ($0[kHISymbolicHotKeyModifiers as String] as? UInt32) == Self.carbonModifiers(binding.modifiers)
+                    && ($0[kHISymbolicHotKeyEnabled as String] as? Bool) == true
+            } ?? true
+            if copied == noErr, !systemUsesCommandSpace {
+                result = RegisterEventHotKey(binding.keyCode, Self.carbonModifiers(binding.modifiers), keyID,
+                                            GetEventDispatcherTarget(), 0, &reference)
+            }
+        }
+        guard result == noErr, let reference else { throw ShortcutError.registrationFailed(result) }
         references[action] = reference
     }
 

@@ -1,6 +1,7 @@
 import AppKit
 import Testing
 import DockDomain
+import DockShortcuts
 @testable import MenuBarDock
 
 /// 외부 앱을 실행하지 않고 실제 AppKit responder와 control 입력 경로를 검증한다.
@@ -215,13 +216,27 @@ struct NativeUIBehaviorTests {
         #expect(!fixture.switcher.isVisible)
     }
 
-    @Test func localOptionTabDoesNotDuplicateTheGlobalShortcut() throws {
+    @Test func localCommandSpaceDoesNotDuplicateTheGlobalShortcut() throws {
         let fixture = UIInputFixture()
         defer { fixture.close() }
         fixture.switcher.show(direction: 1, currentID: fixture.entries[0].id)
-        try fixture.sendPanelKey(48, flags: .option)
+        try fixture.sendPanelKey(49, flags: .command)
+        try fixture.sendPanelKey(49, flags: [.command, .shift])
         try fixture.sendPanelKey(36)
         #expect(fixture.openedIDs == [fixture.entries[1].id])
+    }
+
+    @Test func customOptionTabIsSuppressedOnlyWhenItIsRegistered() throws {
+        let fixture = UIInputFixture()
+        defer { fixture.close() }
+        fixture.model.shortcutBindings = [ShortcutBinding(
+            keyCode: 48, modifiers: UInt64(NSEvent.ModifierFlags.option.rawValue), character: "⇥"
+        )]
+        fixture.switcher.show(direction: 1, currentID: fixture.entries[0].id)
+        try fixture.sendPanelKey(48, flags: .option)
+        try fixture.sendPanelKey(48)
+        try fixture.sendPanelKey(36)
+        #expect(fixture.openedIDs == [fixture.entries[2].id])
     }
 
     @Test func reverseSelectionAndKeypadEnterWork() throws {

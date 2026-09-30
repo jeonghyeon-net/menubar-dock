@@ -39,8 +39,13 @@ final class DockPresentationModel: ObservableObject {
     @Published var loginStatus = ""
     @Published var notice: String?
     @Published var isReadOnly = false
-    @Published var forwardShortcut = "⌥⇥"
-    @Published var backwardShortcut = "⇧⌥⇥"
+    @Published var forwardShortcut = ShortcutBinding.forwardDefault.displayName
+    @Published var backwardShortcut = ShortcutBinding.backwardDefault.displayName
+    var shortcutBindings: [ShortcutBinding] = [.forwardDefault, .backwardDefault]
+
+    func isGlobalShortcut(_ event: NSEvent) -> Bool {
+        preferences.shortcutEnabled && shortcutBindings.contains { $0.matches(event) }
+    }
 
     let imageForApp: (AppEntry) -> NSImage
     var perform: (DockUIAction) -> Void

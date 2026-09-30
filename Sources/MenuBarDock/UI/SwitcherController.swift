@@ -107,6 +107,7 @@ final class SwitcherController: NSObject, NSWindowDelegate, NSSearchFieldDelegat
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false
         )
         panel.title = "앱 선택"
+        panel.isGlobalShortcut = { [weak model] in model?.isGlobalShortcut($0) == true }
         panel.level = .floating
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -284,8 +285,8 @@ final class SwitcherController: NSObject, NSWindowDelegate, NSSearchFieldDelegat
         case "moveLeft:" where !hasQuery: advance(direction: -1)
         case "moveRight:" where !hasQuery: advance(direction: 1)
         case "insertTab:", "insertBacktab:":
-            // 전역 핫키가 이미 처리하는 Option+Tab은 field editor에서 중복 이동하지 않는다.
-            if NSApp.currentEvent?.modifierFlags.contains(.option) != true {
+            // 전역 경로에서 처리한 조합은 field editor에서 중복 이동하지 않는다.
+            if NSApp.currentEvent.map(model.isGlobalShortcut) != true {
                 advance(direction: NSStringFromSelector(commandSelector) == "insertBacktab:" ? -1 : 1)
             }
         case "insertNewline:": confirmSelection()
@@ -303,8 +304,7 @@ final class SwitcherController: NSObject, NSWindowDelegate, NSSearchFieldDelegat
     }
 
     private func handleKey(_ event: NSEvent) {
-        // Option+Tab은 전역 단축키 경로만 처리해 같은 입력이 두 번 이동하지 않게 한다.
-        if event.keyCode == 48 && event.modifierFlags.contains(.option) { return }
+        if model.isGlobalShortcut(event) { return }
         switch event.keyCode {
         case 123, 126: advance(direction: -1)
         case 124, 125: advance(direction: 1)
@@ -350,13 +350,13 @@ final class SwitcherController: NSObject, NSWindowDelegate, NSSearchFieldDelegat
 
 @MainActor
 private final class SwitcherPanel: NSPanel {
+    var isGlobalShortcut: ((NSEvent) -> Bool)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
     override func sendEvent(_ event: NSEvent) {
-        // field editor의 insertTab 시점에는 currentEvent가 바뀔 수 있으므로
-        // 전역 경로에서 처리한 Option+Tab은 창의 입력 경계에서 먼저 제외한다.
-        if event.type == .keyDown, event.keyCode == 48, event.modifierFlags.contains(.option) { return }
+        // 검색창에 공백이 입력되거나 선택이 두 번 이동하지 않도록 창 경계에서 소비한다.
+        if event.type == .keyDown, isGlobalShortcut?(event) == true { return }
         super.sendEvent(event)
     }
 }

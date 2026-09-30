@@ -5,16 +5,72 @@ import Testing
 
 @MainActor
 struct ShortcutTests {
-    @Test("기본 조합은 Option Tab과 역방향이며 실제 키 이벤트에서 복원된다")
+    @Test("이전 기본값은 한 번만 이전하고 사용자 지정 조합은 보존한다")
+    func migratesOnlyLegacyDefaults() throws {
+        let oldForward = binding(keyCode: 48, modifiers: .option, character: "⇥")
+        let oldBackward = binding(keyCode: 48, modifiers: [.option, .shift], character: "⇥")
+        for usesCustomKey in [false, true] {
+            let fixture = try ShortcutFixture()
+            let forward = usesCustomKey ? binding(keyCode: 0, modifiers: [.control, .option], character: "A") : oldForward
+            fixture.defaults.set(try JSONEncoder().encode(["forward": forward, "backward": oldBackward]), forKey: "global-shortcuts.v1")
+            let service = GlobalShortcutService(defaults: fixture.defaults, backend: fixture.backend) { _ in }
+            defer { service.stop() }
+            #expect(service.binding(for: .forward) == (usesCustomKey ? forward : .forwardDefault))
+            #expect(service.binding(for: .backward) == (usesCustomKey ? oldBackward : .backwardDefault))
+            try service.setBinding(oldForward, for: .forward)
+            try service.setBinding(oldBackward, for: .backward)
+            let restored = GlobalShortcutService(defaults: fixture.defaults, backend: FakeShortcutBackend()) { _ in }
+            defer { restored.stop() }
+            #expect(restored.binding(for: .forward) == oldForward)
+            #expect(restored.binding(for: .backward) == oldBackward)
+        }
+    }
+
+    @Test("시스템 준비 뒤 두 번째 키 등록이 실패하면 설정 변경까지 복구한다")
+    func systemPreparationRollsBackOnRegistrationFailure() throws {
+        let fixture = try ShortcutFixture()
+        var systemEnabled = true
+        var preparedBindings: [ShortcutBinding] = []
+        let service = GlobalShortcutService(defaults: fixture.defaults, backend: fixture.backend, prepareRegistration: {
+            preparedBindings = $0
+            systemEnabled = false
+            return { systemEnabled = true }
+        }) { _ in }
+        defer { service.stop() }
+        fixture.backend.failureCalls = [2]
+        #expect(throws: ShortcutError.registrationFailed(-9878)) { try service.setEnabled(true) }
+        #expect(preparedBindings == [.forwardDefault, .backwardDefault])
+        #expect(systemEnabled)
+        #expect(fixture.backend.registered.isEmpty)
+        try service.setEnabled(false)
+        fixture.backend.failureCalls = []
+        try service.setEnabled(true)
+        #expect(!systemEnabled)
+    }
+
+    @Test("시스템 설정 준비에 실패하면 키를 부분 등록하지 않는다")
+    func systemPreparationFailureStopsRegistration() throws {
+        let fixture = try ShortcutFixture()
+        let service = GlobalShortcutService(defaults: fixture.defaults, backend: fixture.backend, prepareRegistration: { _ in
+            throw ShortcutError.registrationFailed(-1)
+        }) { _ in }
+        defer { service.stop() }
+        #expect(throws: ShortcutError.registrationFailed(-1)) { try service.setEnabled(true) }
+        #expect(fixture.backend.registrationCount == 0)
+    }
+
+    @Test("기본 조합은 Command Space와 역방향이며 실제 키 이벤트에서 복원된다")
     func defaultBindingsAndInput() throws {
         let event = try #require(NSEvent.keyEvent(
-            with: .keyDown, location: .zero, modifierFlags: [.option, .shift, .capsLock],
+            with: .keyDown, location: .zero, modifierFlags: [.command, .shift, .capsLock],
             timestamp: 0, windowNumber: 0, context: nil,
-            characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48
+            characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49
         ))
         #expect(ShortcutBinding.from(event: event) == .backwardDefault)
-        #expect(ShortcutBinding.forwardDefault.displayName == "⌥⇥")
-        #expect(ShortcutBinding.backwardDefault.displayName == "⌥⇧⇥")
+        #expect(ShortcutBinding.forwardDefault.displayName == "⌘Space")
+        #expect(ShortcutBinding.backwardDefault.displayName == "⇧⌘Space")
+        try ShortcutBinding.forwardDefault.validate()
+        try ShortcutBinding.backwardDefault.validate()
     }
 
     @Test("수정 키 없는 조합과 앱 종료 같은 예약 조합을 거절한다")
@@ -61,7 +117,7 @@ struct ShortcutTests {
         let fixture = try ShortcutFixture()
         let service = GlobalShortcutService(defaults: fixture.defaults, backend: fixture.backend) { _ in }
         defer { service.stop() }
-        let duplicate = binding(keyCode: 48, modifiers: [.option], character: "다른 표시")
+        let duplicate = binding(keyCode: 49, modifiers: [.command], character: "다른 표시")
         #expect(throws: ShortcutError.duplicateCombination) {
             try service.setBinding(duplicate, for: .backward)
         }
