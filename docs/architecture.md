@@ -6,7 +6,7 @@
 
 사용자가 정한 순서를 유지하는 메뉴 막대 런처다. 설정에는 **항상 표시할 앱** 단일 목록을 제공한다. 미등록 실행 앱을 앞쪽에, 등록 앱을 뒤쪽에 지정 순서대로 표시하며 두 그룹에 같은 앱을 중복 표시하지 않는다. 실행 앱 자동 표시는 설정으로 끌 수 있다. 앱 활성화는 각 그룹의 상대 순서를 바꾸지 않는다. 실행 중 점·밑줄·배지와 예약 공간은 없다.
 
-단축키는 Option+Tab / Shift+Option+Tab 이동, Enter 실행, Esc 취소다. Option을 놓아도 실행하지 않는다. 사용자가 조합을 변경할 수 있다. 이미 실행된 앱에는 표준 reopen/activate 요청을 보내고, 종료된 앱은 실행한다. 새 창의 디스플레이 강제 지정과 다른 앱 창 이동은 사용자 요청으로 제외했다.
+단축키는 Command+Space / Shift+Command+Space 이동, Enter 실행, Esc 취소다. Command를 놓아도 실행하지 않는다. 사용자가 조합을 변경할 수 있다. 이미 실행된 앱에는 표준 reopen/activate 요청을 보내고, 종료된 앱은 실행한다. 새 창의 디스플레이 강제 지정과 다른 앱 창 이동은 사용자 요청으로 제외했다.
 
 선택 패널의 검색은 `NSMetadataQuery`로 macOS Spotlight 인덱스를 읽는다. `SearchSession`은 검색어별 결과와 선택을 관리하고, `SpotlightSearchService`는 OS 조회·취소·결과 변환을 담당한다. `SwitcherController`는 입력창을 유지한 채 앱 전환과 검색 결과를 전환한다. 새 입력마다 이전 요청을 취소하고 요청 세대 번호도 비교하여 늦은 응답을 버린다. 한글 조합 중에는 검색과 실행을 보류하며, 검색 결과 열기는 `SearchResultOpener`를 통해 처리한다. 검색 명령은 catalog의 등록·순서·제외 상태를 변경하지 않는다. 검색으로 새 앱을 실행했을 때의 Workspace 이벤트는 기존 자동 표시 정책을 따른다.
 
@@ -88,7 +88,7 @@ WorkspaceMonitor는 runningApplications KVO와 실행·종료·활성화·숨김
 
 기본 아이콘은 24pt(16–32pt), 추가 간격은 0pt(0–28pt)다. 원본의 custom image view와 표준 버튼의 렌더링 경계는 다르므로 원본의 40pt 수치를 그대로 사용하지 않는다. 이미지에는 요청한 크기를 그대로 적용한다. 표준 버튼이 이미지 크기에 맞춰 높이를 결정하므로 이전 버튼 높이를 크기의 상한으로 사용하지 않는다. 영역 너비는 아이콘 크기와 추가 간격의 합이다. 0pt에서는 앱이 여백을 추가하지 않으며 macOS가 각 독립 상태 항목에 붙이는 기본 여백은 남는다. 아이콘 크기를 바꿔도 추가 간격을 보존한다. 이미지 크기를 바꿀 때는 독립 복사본을 사용한다. 강제 aqua/darkAqua, 고정 대비 필터, 강제 active material을 사용하지 않는다. 표준 시스템 버튼이 외관과 입력을 담당한다.
 
-상단에는 앱 아이콘만 표시한다. 관리용 말줄임표나 런처 glyph는 없다. 표시 개수를 넘긴 앱은 Option+Tab 선택 패널에서 열고, 우클릭 또는 Control-클릭 메뉴에서 모든 옵션이 있는 단일 설정 창을 연다. Finder에서 앱 재실행 또는 선택 패널의 톱니 버튼으로도 설정을 연다. 앱이 없으면 상태 항목도 없다. 첫 실행은 설정을 열어 앱을 추가할 수 있게 한다.
+상단에는 앱 아이콘만 표시한다. 관리용 말줄임표나 런처 glyph는 없다. 표시 개수를 넘긴 앱은 Command+Space 선택 패널에서 열고, 우클릭 또는 Control-클릭 메뉴에서 모든 옵션이 있는 단일 설정 창을 연다. Finder에서 앱 재실행 또는 선택 패널의 톱니 버튼으로도 설정을 연다. 앱이 없으면 상태 항목도 없다. 첫 실행은 설정을 열어 앱을 추가할 수 있게 한다.
 
 사용자 [회귀 참고 이미지](assets/inactive-display-reference.png)의 흰색 번짐과 청록색 편향은 두 화면에서 비교해야 한다. 외관 강제 지정을 제거한 것만으로 이 문제가 해결됐다고 확정하지 않는다. 노치나 메뉴 폭 때문에 항목이 가려지면 표시 개수를 줄이거나 키보드 선택 패널을 사용한다. `isVisible`은 가림 판정 수단이 아니다. [Apple 문서](https://developer.apple.com/documentation/appkit/nsstatusitem/isvisible).
 
@@ -98,7 +98,11 @@ WorkspaceMonitor는 runningApplications KVO와 실행·종료·활성화·숨김
 
 세션이 열릴 때 목록 순서를 고정한다. 선택 도중 새 앱은 추가하지 않고 사라진 항목만 제거한다. 현재 앱이 없으면 정방향 첫 항목·역방향 마지막 항목부터 시작한다. 방향키·Tab도 이동하며 Return/keypad Enter로 실행한다. 검색 중 좌우 방향키는 글자 커서를 움직이고, Escape는 검색어를 지운 뒤 비어 있는 상태에서 패널을 닫는다. 전역 단축키와 패널 입력이 중복 이동하지 않도록 등록 조합은 전역 경로에서 처리한다.
 
-Carbon에는 지정 조합 두 개만 등록한다. 설정 기록 동안 등록을 중지하고 재개하며, 충돌 때 이전 조합을 복구한다. 키를 누르는 동안에만 반복 타이머가 있고 release/suspend/stop 시 제거한다. 단축키 실패해도 마우스와 설정에 접근할 수 있다.
+기본 조합은 ⌘ Space와 ⇧⌘ Space다. Carbon에는 지정 조합 두 개만 등록한다. 설정 기록 동안 등록을 중지하고 재개하며, 충돌 때 이전 조합을 복구한다. 키를 누르는 동안에만 반복 타이머가 있고 release/suspend/stop 시 제거한다. 단축키 실패해도 마우스와 설정에 접근할 수 있다.
+
+`DockPlatform.SpotlightShortcutOverride`는 ⌘ Space를 등록하기 전에 같은 조합인 Spotlight 시스템 항목 64만 해제하고 변경을 적용한다. 두 키 중 하나라도 등록에 실패하면 이번 시스템 설정 변경을 복구한다. 다른 단축키 항목과 사용자가 따로 지정한 Spotlight 조합은 보존한다. 성공한 해제는 앱 종료 후에도 유지한다. macOS가 해제한 Spotlight 조합의 독점권을 유지하면, ⌘ Space만 Spectacle/MASShortcut과 같은 일반 Carbon 등록으로 전환한다. 먼저 `CopySymbolicHotKeys`로 활성 시스템 충돌이 없는지 확인하며 다른 조합은 독점 등록을 유지한다. 자세한 근거와 한계는 [단축키 설계 결정](adr/0005-command-space-override.md)에 있다.
+
+단축키 저장 데이터에는 기본값 세대를 기록한다. 이전 기본 조합 두 개를 함께 쓰던 설정만 한 번 이전하며, 새 버전에서 사용자가 다시 지정한 조합은 다음 시작에도 유지한다. 선택 패널은 표시 문자열이 아니라 현재 등록한 키 코드·수정 키와 비교해 중복 입력을 소비한다.
 
 ApplicationLauncher는 같은 설치 경로의 진행 중 요청을 합친다. NSWorkspace.openApplication에 `createsNewApplicationInstance=false`, `allowsRunningApplicationSubstitution=false`를 명시한다. 신규·기존 앱 모두 activates=true인 표준 open/reopen 요청을 한 번 보낸다. 비활성 reopen 후 별도 activate를 보내던 경로는 제거했다. 다른 설치 위치가 반환되거나 OS가 실행을 거절하면 오류를 전달한다. 사용자 의도 없는 재시도나 강제 focus 탈취는 없다. [OpenConfiguration](https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration).
 

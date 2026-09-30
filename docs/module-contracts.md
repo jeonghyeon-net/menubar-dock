@@ -43,7 +43,8 @@ AppKit/Carbon 경계다. 다른 로컬 target에 의존하지 않는다.
 - `GlobalShortcutService`: setEnabled, setBinding, binding, reset, suspend, stop.
 - `cancelCurrentPress()`: 패널을 닫을 때 현재 누름의 반복을 제거하고 release까지 재호출을 막는다.
 - 등록 backend를 주입해 충돌·롤백·키 해제·재진입을 실제 시스템 설정 변경 없이 테스트한다.
-- UserDefaults가 단축키 조합을 단독 소유한다. 등록 실패 상태와 사용자가 원하는 enabled 상태를 구분한다.
+- 기본 조합은 ⌘ Space / ⇧⌘ Space다. UserDefaults가 단축키 조합과 기본값 이전 세대를 단독 소유한다. 등록 실패 상태와 사용자가 원하는 enabled 상태를 구분한다.
+- `ApplicationController`가 `DockPlatform.SpotlightShortcutOverride`를 등록 준비 콜백으로 연결한다. 시스템 설정 변경은 플랫폼에서, 두 키 등록과 실패 시 복구는 단축키 서비스에서 책임진다. `--smoke-test`에서는 이 경로를 실행하지 않는다.
 
 ## UI와 앱 조립
 

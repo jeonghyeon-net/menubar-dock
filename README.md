@@ -6,7 +6,7 @@ Dock은 숨기고, 앱은 메뉴 막대에서 여세요.
   <img src="docs/assets/menu-bar-hero.png" width="605" alt="실제 macOS 메뉴 막대에 나란히 놓인 시스템 설정, ChatGPT, Safari, Slack, Notion, Visual Studio Code, Finder 아이콘">
 </p>
 
-각 앱 아이콘을 클릭하면 바로 실행하거나 전환합니다. 앱 순서·크기·간격을 조절하고, 메뉴 막대에 다 들어가지 않는 앱은 `Option+Tab`으로 선택할 수 있습니다.
+각 앱 아이콘을 클릭하면 바로 실행하거나 전환합니다. 앱 순서·크기·간격을 조절하고, 메뉴 막대에 다 들어가지 않는 앱은 `Command+Space`로 선택할 수 있습니다.
 
 [다운로드·설치](#시작하기) · [사용 안내](docs/user-guide.md) · [개발과 기여](CONTRIBUTING.md)
 
@@ -23,13 +23,15 @@ macOS 14 이상의 Apple Silicon Mac에서 사용할 수 있습니다.
 ## 사용하기
 
 - 메뉴 막대의 앱 아이콘을 **왼쪽 클릭**하면 앱이 열립니다.
-- `Option+Tab` 패널의 **톱니 버튼**으로 설정을 엽니다. 아이콘 우클릭 메뉴나 Menu Bar Dock 재실행으로도 열 수 있습니다.
+- `Command+Space` 패널의 **톱니 버튼**으로 설정을 엽니다. 아이콘 우클릭 메뉴나 Menu Bar Dock 재실행으로도 열 수 있습니다.
 - 설정의 **항상 표시할 앱**에 `+`로 추가하고 드래그로 순서를 정합니다. `−`는 고정만 해제하며, 실행 중인 앱은 앞쪽에 남고 종료하면 사라집니다.
 - 등록하지 않은 실행 중 앱은 앞쪽에, 등록한 앱은 뒤쪽에 저장한 순서로 표시합니다. 같은 앱은 한 번만 표시합니다.
 
 macOS Dock에 고정한 앱과 Finder는 자동으로 가져옵니다. Finder가 필요 없으면 설정에서 **Finder 숨기기**를 켜세요. 아이콘 크기·간격·최대 표시 개수와 로그인할 때 시작 여부도 설정에서 바꿀 수 있습니다.
 
-`Option+Tab`으로 앱을 고른 뒤 **Enter**로 엽니다. 패널에서 이름을 입력하면 이 Mac의 앱을 검색합니다. **Esc**는 검색어를 지우고, 검색어가 없으면 패널을 닫습니다.
+`Command+Space`는 macOS Spotlight 대신 Menu Bar Dock을 엽니다. 기본 조합을 사용하면 Spotlight의 해당 단축키를 자동으로 해제합니다.
+
+`Command+Space`로 앱을 고른 뒤 **Enter**로 엽니다. 패널에서 이름을 입력하면 이 Mac의 앱을 검색합니다. **Esc**는 검색어를 지우고, 검색어가 없으면 패널을 닫습니다.
 
 <details>
 <summary>설정과 키보드 선택 화면</summary>
@@ -39,7 +41,7 @@ macOS Dock에 고정한 앱과 Finder는 자동으로 가져옵니다. Finder가
 </p>
 
 <p align="center">
-  <img src="docs/assets/switcher.png" width="420" alt="검색 입력창과 앱 아이콘을 함께 보여 주는 Option+Tab 선택 패널">
+  <img src="docs/assets/switcher.png" width="420" alt="검색 입력창과 앱 아이콘을 함께 보여 주는 Command+Space 선택 패널">
 </p>
 
 </details>

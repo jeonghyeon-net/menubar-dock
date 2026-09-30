@@ -39,7 +39,7 @@ CLI Swift Testing에서 NSButton.performClick의 중첩 루프가 테스트 프�
 
 macOS 27.0 / Swift 6.4 / Apple Silicon 환경에서 설정 창의 앱 목록과 단축키 화면을 직접 관찰했다. 앱 메뉴에서 선택 패널을 열고 방향키 이동·Enter 확정·설정 복귀를 확인했다. 표준 네이티브 메뉴, 앱 아이콘, 한국어 레이블, 접근성 트리를 확인했다. 실제 파일 선택에서 계산기 앱 추가·고정·위로 이동을 확인했다. 목록 제거에서 드러난 Swift inout 중첩 접근 충돌을 수정하고, 실제 ApplicationController에 명령을 전달하는 회귀 테스트를 추가했다.
 
-자동화 도구의 대상 앱 키 입력과 실제 하드웨어 전역 단축키는 별도다. Option+Tab의 실제 하드웨어 입력은 사용자 확인 항목으로 남긴다. Carbon 독점 등록으로 다른 앱과의 조합 충돌을 오류로 알리고, 단축키 서비스의 등록·롤백·반복·취소는 테스트한다.
+현재 기본 키는 ⌘ Space / ⇧⌘ Space다. `mise run global-shortcut-check`로 Spotlight 설정 해제와 System Events → WindowServer → Carbon의 전역 입력 전달을 확인한다. 물리 키보드 입력, 지원 macOS 전체와 fullscreen/Spaces 조합은 별도 확인 범위다. 등록·시스템 설정 복구·반복·취소·기본값 이전은 로컬 테스트로 검사한다.
 
 ## 요구별 상태와 출시 전 실기기 확인
 
@@ -49,7 +49,7 @@ macOS 27.0 / Swift 6.4 / Apple Silicon 환경에서 설정 창의 앱 목록과 
 | R2 | 중간 padding 제거 | 앱별 항목, 실제 표시 수만 생성, 여분 슬롯 제거 | 로그인 직후/노치/두 화면 |
 | R3 | 비활성 화면 색상 | 독립 NSStatusBarButton, 강제 외관 없음, 1x/2x 캐시 | 사용자 참고 이미지와 두 화면 활성/비활성 비교 |
 | R4 | 실행 중 표시 제외 | 점·밑줄·배지·예약 공간 없음 | 완료 |
-| R5 | 키보드 | 순환·Enter·Esc·키 반복·기록·충돌 테스트 | 실제 Option+Tab, fullscreen/Spaces |
+| R5 | 키보드 | 순환·Enter·Esc·키 반복·기록·충돌 테스트 | 물리 ⌘ Space, fullscreen/Spaces |
 | R6 | 앱 실행 | 설치 경로 검증·요청 병합·reopen/activate | 다양한 외부 앱·최소 지원 OS |
 | R7 | 실패 복구 | JSON 손상·미래 schema·저장 revision·경로 변경·단축키 롤백 | 로그인 승인·장시간 사용 |
 

@@ -132,7 +132,8 @@ awk '$2 == "MenuBarDock-1.0.4-arm64.dmg" { print }' SHA256SUMS | shasum -a 256 -
 패키지 검사는 다른 Mac에서 다운로드한 앱의 최초 설치를 대신하지 않습니다. 다음 항목은 실제로 수행한 결과만 [검증 기록](verification/)에 남깁니다.
 
 - Applications에서 실행, Finder 재실행으로 설정 열기, 로그인 시작 등록·해제
-- 메뉴 막대의 앱별 클릭·순서 저장, Option+Tab 전체 목록·반복 입력·단축키 충돌
+- 메뉴 막대의 앱별 클릭·순서 저장, Command+Space 전체 목록·반복 입력·단축키 충돌
+- `mise run global-shortcut-check`: Spotlight 설정 자동 해제와 실제 전역 입력. 같은 키를 사용하는 앱을 먼저 종료하고 [검사 안내](../CONTRIBUTING.md#전역-단축키-검증)에 따라 명시적으로 실행
 - 화면 배율·비활성 디스플레이·노치·Spaces·전체 화면과 장시간 사용
 - 지원 macOS 버전별 실제 동작과 다운로드 파일의 Gatekeeper 허용 상태
 
@@ -144,4 +145,4 @@ awk '$2 == "MenuBarDock-1.0.4-arm64.dmg" { print }' SHA256SUMS | shasum -a 256 -
 | `--smoke-test --data-directory <임시 경로>` | 별도 JSON 저장 경로에서 시작·저장·정상 종료 |
 | `--show-settings` | 시작 후 설정 창 표시 |
 
-`smoke-test`는 임시 JSON 디렉터리를 사용합니다. 단축키 UserDefaults와 로그인 항목은 macOS의 별도 저장소이므로 이 검사에서 변경하지 않습니다. 진단 로그의 사용자 앱 경로와 이름은 기본적으로 비공개로 처리합니다.
+`smoke-test`는 임시 JSON 디렉터리를 사용합니다. 전역 단축키 서비스는 시작하지 않으므로 단축키 UserDefaults·Spotlight 설정을 변경하거나 실행 중인 앱의 키를 점유하지 않습니다. 로그인 항목도 변경하지 않습니다. 진단 로그의 사용자 앱 경로와 이름은 기본적으로 비공개로 처리합니다.

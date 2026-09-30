@@ -67,6 +67,7 @@ open "build/Menu Bar Dock.app"
 | `mise run check` | 릴리스 도구 검사, 경고를 오류로 처리하는 빌드, Swift 테스트, 아래 세 가지 실제 입력 검사 |
 | `mise run input-check` | 메뉴 막대 앱별 버튼의 실제 마우스 누름·해제 검사 |
 | `mise run settings-input-check` | 크기·간격 슬라이더의 실제 드래그와 즉시 반영 검사 |
+| `mise run global-shortcut-check` | Spotlight 설정 자동 해제와 System Events를 통한 전역 ⌘ Space / ⇧⌘ Space 입력 검사 |
 | `mise run switcher-input-check` | 앱 검색·커서·선택·취소·한글 조합·포커스 검사 |
 | `mise run app` | arm64 Release 앱 번들 생성 |
 | `mise run run` | 앱 번들을 빌드한 뒤 실행 |
@@ -144,3 +145,9 @@ README는 일반 사용자의 간단한 설치와 사용 흐름에 집중합니�
 변경한 동작은 CHANGELOG에 기록하고, 게시 본문은 실제 커밋 범위와 패키지의 검증된 메타데이터에서 생성합니다. 제목의 Markdown 구두점 때문에 릴리스 본문이 깨지지 않도록 생성기가 이스케이프합니다. 새로운 게시와 기존 설명 갱신에 같은 생성기를 사용합니다.
 
 패키징을 수정했다면 `mise run release-test`와 `mise run package-test`를 실행합니다. 게시 전에는 깨끗한 `main`을 원격과 맞추고 `mise run release-prepare` 결과를 검토합니다. 공개 릴리스의 태그나 바이너리는 교체하지 않습니다. 자세한 명령, 서명·공증과 실패 복구는 [빌드와 릴리스](docs/releasing.md)를 따릅니다.
+
+## 전역 단축키 검증
+
+`mise run global-shortcut-check`는 일반 `check`와 분리된 명시적 검사입니다. 제품과 같은 경로로 Spotlight의 ⌘ Space를 해제하고 System Events로 전역 입력을 보냅니다. 새 버전의 Menu Bar Dock이나 같은 조합을 사용하는 앱은 먼저 종료하세요. 실행 도구에 macOS의 System Events 자동화·손쉬운 사용 승인이 필요할 수 있습니다. 검사 종료 후에도 Spotlight 해제는 유지되며, 복구 방법은 [사용 안내](docs/user-guide.md#macos-단축키-우선-사용)에 있습니다.
+
+`check`의 설정·패널 입력 검사는 로컬 AppKit 이벤트를 사용하고 시스템 단축키 설정을 바꾸지 않습니다. 배포 `smoke-test`도 전역 키 서비스와 단축키 UserDefaults를 건드리지 않습니다. 실제 입력 결과와 지원 OS별 미확인 범위는 [⌘ Space 검증 기록](docs/verification/1.0.7.md)에 구분합니다.
