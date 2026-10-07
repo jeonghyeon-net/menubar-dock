@@ -64,7 +64,7 @@ flowchart TD
 
 `DockConfiguration`은 항목 목록과 독립적인 `order: [AppID]`를 갖는다. `savedApps`는 항상 표시하도록 등록했고 제외되지 않은 항목만 저장 순서대로 반환하며, 설정 목록은 이 투영을 사용한다. `visibleItems(runningIDs:)`는 저장 순서에 있는 미등록 실행 앱을 먼저, `savedApps`를 나중에 연결한다. 등록 앱은 실행 여부에 따라 그룹을 옮기지 않는다.
 
-`DockPreferences.hidesFinder`가 켜져 있으면 이 표시 투영에서 `com.apple.finder`만 제외한다. 등록 상태·순서는 바꾸지 않으며 Spotlight 검색에는 적용하지 않는다. 기본값과 기존 설정에 키가 없을 때의 값은 `false`다.
+`DockConfiguration.hiddenApps`는 등록 목록과 독립된 숨김 정책이다. 표시 투영에서 bundle identifier가 같은 앱을 제외하며 identifier가 없으면 정규 설치 경로로 구분한다. 관찰 ID·경로가 바뀌거나 이력을 정리해도 숨김 기록은 남는다. 등록 상태·순서는 바꾸지 않으며 Spotlight 검색에는 적용하지 않는다. 설정은 등록 앱과 숨김 앱을 나란히 보여 주고, 숨겨진 등록 행에는 숨김 상태를 표시한다. schema 3은 v1·v2를 읽고 이전 `hidesFinder`를 숨김 목록으로 한 번 이전한다. 구버전은 schema 3을 읽기 전용으로 보호한다.
 
 `save(id)`는 미등록 항목을 등록 목록 끝에 추가한다. 이미 등록한 항목은 순서를 유지한다. `moveSaved(fromOffsets:toOffset:)`는 설정에 보이는 부분 목록의 인덱스로 이동하며, 미등록 이력의 상대 순서를 바꾸지 않는다. `+`와 아이콘 메뉴의 **목록에 추가**는 같은 등록 정책을 사용한다. 파일 선택으로 추가할 때는 등록 복사본의 bookmark를 먼저 복구해, 앱 이동 직후에도 기존 ID를 찾아 끝에 저장하고 충돌 시 원래 설정을 보존한다. 자동 감지와 활성화 이벤트는 기존 등록 순서를 덮지 않는다.
 

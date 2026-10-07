@@ -27,7 +27,7 @@ macOS 14 이상의 Apple Silicon Mac에서 사용할 수 있습니다.
 - 설정의 **항상 표시할 앱**에 `+`로 추가하고 드래그로 순서를 정합니다. `−`는 고정만 해제하며, 실행 중인 앱은 앞쪽에 남고 종료하면 사라집니다.
 - 등록하지 않은 실행 중 앱은 앞쪽에, 등록한 앱은 뒤쪽에 저장한 순서로 표시합니다. 같은 앱은 한 번만 표시합니다.
 
-macOS Dock에 고정한 앱과 Finder는 자동으로 가져옵니다. Finder가 필요 없으면 설정에서 **Finder 숨기기**를 켜세요. 아이콘 크기·간격·최대 표시 개수와 로그인할 때 시작 여부도 설정에서 바꿀 수 있습니다.
+macOS Dock에 고정한 앱과 Finder는 자동으로 가져옵니다. 표시하지 않을 앱은 설정의 **숨길 앱 → 앱 숨기기…**에서 고르세요. Finder를 포함해 여러 앱을 관리할 수 있습니다. 아이콘 크기·간격·최대 표시 개수와 로그인할 때 시작 여부도 설정에서 바꿀 수 있습니다.
 
 `Command+Space`는 macOS Spotlight 대신 Menu Bar Dock을 엽니다. 기본 조합을 사용하면 Spotlight의 해당 단축키를 자동으로 해제합니다.
 
@@ -37,7 +37,7 @@ macOS Dock에 고정한 앱과 Finder는 자동으로 가져옵니다. Finder가
 <summary>설정과 키보드 선택 화면</summary>
 
 <p align="center">
-  <img src="docs/assets/settings.png" width="540" alt="항상 표시할 앱 목록, 아이콘 크기·간격, 단축키를 한 창에서 조절하는 설정">
+  <img src="docs/assets/settings.png" width="720" alt="항상 표시할 앱과 숨길 앱, 아이콘 크기·간격, 단축키를 한 창에서 관리하는 설정">
 </p>
 
 <p align="center">
