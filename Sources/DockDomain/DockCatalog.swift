@@ -21,6 +21,7 @@ public struct DockCatalog: Sendable {
     @discardableResult
     public mutating func upsert(_ app: AppEntry) -> AppID? {
         guard !app.id.rawValue.isEmpty else { return nil }
+        refreshHiddenApp(app)
         let suppressed = configuration.removedApps.first { $0.id == app.id || sameInstallation($0, app) }
         let existingIndex = configuration.apps.firstIndex(where: { $0.id == app.id })
             ?? configuration.apps.firstIndex(where: { sameInstallation($0, app) })
@@ -165,6 +166,38 @@ public struct DockCatalog: Sendable {
 
     public mutating func updatePreferences(_ preferences: DockPreferences) {
         configuration.preferences = preferences.normalized()
+        configuration.migrateFinderVisibility()
+    }
+
+    public func isHidden(_ app: AppEntry) -> Bool {
+        configuration.hiddenApps.contains { sameHiddenApplication($0, app) }
+    }
+
+    /// 숨김은 고정 해제와 독립된 표시 정책이다. 해제하면 이전 등록 상태와 순서로 돌아간다.
+    public mutating func hideApp(_ app: AppEntry) {
+        guard !app.id.rawValue.isEmpty, !app.bundlePath.isEmpty, !isHidden(app) else { return }
+        var hidden = app
+        // 등록 항목을 다른 앱으로 재지정해도 숨김 목록의 선택 ID는 충돌하지 않는다.
+        if configuration.hiddenApps.contains(where: { $0.id == hidden.id }) { hidden.id = AppID() }
+        configuration.hiddenApps.append(hidden)
+    }
+
+    public mutating func restoreHiddenApp(_ id: AppID) {
+        configuration.hiddenApps.removeAll { $0.id == id }
+    }
+
+    public mutating func refreshHiddenApp(_ app: AppEntry) {
+        guard let index = configuration.hiddenApps.firstIndex(where: {
+            sameHiddenApplication($0, app) || ($0.id == app.id && $0.bundleIdentifier == app.bundleIdentifier)
+        }) else { return }
+        let previous = configuration.hiddenApps[index]
+        var refreshed = app
+        refreshed.id = previous.id
+        refreshed.isPinned = previous.isPinned
+        refreshed.isExcluded = previous.isExcluded
+        refreshed.bookmarkData = app.bookmarkData ?? previous.bookmarkData
+        refreshed.lastSeen = max(previous.lastSeen, app.lastSeen)
+        configuration.hiddenApps[index] = refreshed
     }
 
     public mutating func updateKnownSystemDockPaths(_ paths: [String]) {
@@ -179,9 +212,9 @@ public struct DockCatalog: Sendable {
             !$0.isPinned && !$0.isExcluded && runningIDs.contains($0.id)
         } : []
         // 실행 이벤트는 저장 순서를 변경하지 않는다. 임시 앱도 기존 관찰 순서만 사용한다.
-        // Finder 숨김은 표시 후보에만 적용해 등록 상태와 사용자가 정한 순서를 보존한다.
+        // 숨김 목록은 표시 후보에만 적용해 등록 상태와 사용자가 정한 순서를 보존한다.
         return (temporary + savedApps)
-            .filter { !configuration.preferences.hidesFinder || $0.bundleIdentifier != "com.apple.finder" }
+            .filter { !isHidden($0) }
             .map { DockItem(app: $0, isRunning: runningIDs.contains($0.id)) }
     }
 

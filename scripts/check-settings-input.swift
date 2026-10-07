@@ -71,9 +71,13 @@ private final class SettingsSnapshot {
             AppEntry(id: AppID(rawValue: "snapshot.settings"), name: "System Settings", bundleIdentifier: "com.apple.systempreferences",
                      bundlePath: "/System/Applications/System Settings.app", isPinned: true)
         ]
+        model.hiddenApps = [model.apps[0], model.apps[2]]
+        let hiddenIDs = Set(model.hiddenApps.map(\.id))
+        model.hiddenSavedAppIDs = hiddenIDs
+        model.hideableApps = model.apps.filter { !hiddenIDs.contains($0.id) }
         settings = SettingsWindowController(model: model)
         // 기존 프레임 자동 저장 값이 문서 이미지 크기를 바꾸지 않게 한다.
-        settings.window?.setContentSize(NSSize(width: 540, height: 600))
+        settings.window?.setContentSize(NSSize(width: 720, height: 650))
     }
 
     func write(to url: URL) {

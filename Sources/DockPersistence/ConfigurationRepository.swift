@@ -109,7 +109,7 @@ public actor ConfigurationRepository {
         case 1:
             // 이전 화면의 크기·간격 단위는 저장 경계에서만 현재 모델로 변환한다.
             configuration = try Self.makeDecoder().decode(LegacyConfigurationV1.self, from: data).migrated()
-        case DockConfiguration.currentSchemaVersion:
+        case 2, DockConfiguration.currentSchemaVersion:
             configuration = try Self.makeDecoder().decode(DockConfiguration.self, from: data)
             // 초기 v2의 40pt는 잘못 배포된 기본값이다. 형식은 그대로 두고 기본값만 보정하며,
             // 정상 사용자 파일의 손상으로 안내하지 않도록 정규화 비교 전에 적용한다.
@@ -119,6 +119,8 @@ public actor ConfigurationRepository {
         default:
             throw ConfigurationRepositoryError.invalidSchema(version)
         }
+        configuration.schemaVersion = DockConfiguration.currentSchemaVersion
+        configuration.migrateFinderVisibility()
         // 이전 버전은 두 크기를 독립적으로 허용했다. 정상 범위의 조합은 손상 경고 없이
         // 현재 화면의 추가 간격 0...28pt에 맞추고, 실제 범위 오류는 아래 정규화에서 안내한다.
         if (16.0...32.0).contains(configuration.preferences.iconSize),

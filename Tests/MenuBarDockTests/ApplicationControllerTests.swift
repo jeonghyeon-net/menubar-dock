@@ -60,6 +60,39 @@ struct ApplicationControllerTests {
         #expect(model.items.suffix(2).map(\.id) == [last.id, first.id])
     }
 
+    @Test("숨김 명령은 실제 표시를 즉시 거르고 재시작 뒤에도 유지하며 해제 시 순서를 복원한다")
+    func hiddenListCommandsPersistWithoutChangingSavedOrder() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let apps = (1...3).map {
+            AppEntry(id: AppID(rawValue: "hidden-test-\($0)"), name: "앱 \($0)", bundleIdentifier: "example.hidden\($0)",
+                     bundlePath: "/fixture/\($0).app", isPinned: true, lastSeen: Date(timeIntervalSince1970: 1_000))
+        }
+        let preferences = DockPreferences(showsRunningApps: false, shortcutEnabled: false)
+        try await ConfigurationRepository(directory: directory).save(DockConfiguration(apps: apps, preferences: preferences), revision: 1)
+        _ = NSApplication.shared
+        let controller = ApplicationController(directory: directory, readSystemDock: { [] }, allowsGlobalShortcuts: false)
+        await controller.start(showSettings: false)
+        let model = controller.presentation
+        model.perform(.hideFromDock(apps[0]))
+        model.perform(.hideFromDock(apps[2]))
+        #expect(model.items.map(\.id) == [apps[1].id])
+        #expect(model.apps.map(\.id) == apps.map(\.id))
+        #expect(model.hiddenApps.map(\.id) == [apps[0].id, apps[2].id])
+        #expect(model.hideableApps.filter { apps.map(\.id).contains($0.id) }.map(\.id) == [apps[1].id])
+        try await Task.sleep(for: .milliseconds(350))
+        controller.stop()
+        let reopened = ApplicationController(directory: directory, readSystemDock: { [] }, allowsGlobalShortcuts: false)
+        await reopened.start(showSettings: false)
+        defer { reopened.stop() }
+        #expect(reopened.presentation.items.map(\.id) == [apps[1].id])
+        #expect(reopened.presentation.hiddenApps.map(\.id) == [apps[0].id, apps[2].id])
+        reopened.presentation.perform(.restoreHiddenApp(apps[0].id))
+        reopened.presentation.perform(.restoreHiddenApp(apps[2].id))
+        #expect(reopened.presentation.items.map(\.id) == apps.map(\.id))
+        #expect(reopened.presentation.apps.map(\.id) == apps.map(\.id))
+    }
+
     @Test func separateSearchResultsCanOpenWhileAnotherLaunchIsPending() async {
         var started: [String] = []
         var pending: [String: CheckedContinuation<Void, Never>] = [:]

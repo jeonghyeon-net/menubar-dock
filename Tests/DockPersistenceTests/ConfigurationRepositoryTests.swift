@@ -44,12 +44,47 @@ struct ConfigurationRepositoryTests {
         expected.order = [finder.id, expected.apps[0].id]
         expected.preferences = DockPreferences(iconSize: 20, slotWidth: 25, maxVisibleApps: 9)
         for (index, hidden) in [true, false].enumerated() {
-            expected.preferences.hidesFinder = hidden
+            expected.hiddenApps = hidden ? [finder] : []
             try await fixture.repository.save(expected, revision: UInt64(index + 1))
             let reopened = try await ConfigurationRepository(directory: fixture.directory).load()
             #expect(reopened.warning == nil)
             #expect(reopened.configuration == expected)
         }
+    }
+
+    @Test("Finder 전용 설정은 앱이 등록되어 있지 않아도 경고 없이 숨김 목록으로 이전한다")
+    func legacyFinderVisibilityMigratesWithoutLosingPreferences() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        try Data(#"{"schemaVersion":2,"preferences":{"hidesFinder":true,"iconSize":20,"slotWidth":25}}"#.utf8).write(to: fixture.primary)
+        let loaded = try await fixture.repository.load()
+        #expect(loaded.warning == nil)
+        #expect(loaded.configuration.schemaVersion == DockConfiguration.currentSchemaVersion)
+        #expect(loaded.configuration.hiddenApps.map(\.bundleIdentifier) == ["com.apple.finder"])
+        #expect(loaded.configuration.apps.isEmpty)
+        #expect(loaded.configuration.preferences == DockPreferences(iconSize: 20, slotWidth: 25))
+        var catalog = DockCatalog(configuration: loaded.configuration)
+        let finder = try #require(catalog.configuration.hiddenApps.first)
+        catalog.restoreHiddenApp(finder.id)
+        try await fixture.repository.save(catalog.configuration, revision: 1)
+        let reopened = try await ConfigurationRepository(directory: fixture.directory).load()
+        #expect(reopened.configuration.hiddenApps.isEmpty)
+        #expect(reopened.warning == nil)
+    }
+
+    @Test("여러 앱 숨김은 백업 복구 후에도 유지되고 등록·삭제 기록과 분리된다")
+    func multipleHiddenAppsSurviveBackupRecovery() async throws {
+        let fixture = try RepositoryFixture()
+        defer { fixture.cleanUp() }
+        var state = configuration("등록 앱")
+        let hidden = AppEntry(id: AppID(rawValue: "hidden"), name: "숨길 앱", bundleIdentifier: "example.hidden", bundlePath: "/Applications/Hidden.app", lastSeen: Date(timeIntervalSince1970: 1_000))
+        state.hiddenApps = [state.apps[0], hidden]
+        try await fixture.repository.save(state, revision: 1)
+        try Data("손상".utf8).write(to: fixture.primary)
+        let recovered = try await ConfigurationRepository(directory: fixture.directory).load()
+        #expect(recovered.configuration == state)
+        #expect(recovered.warning != nil)
+        #expect(recovered.configuration.removedApps.isEmpty)
     }
 
     @Test("Finder 숨김 키가 없는 이전 설정은 기존 표시 상태로 읽는다", arguments: [1, 2])
@@ -241,7 +276,7 @@ struct ConfigurationRepositoryTests {
         #expect(result.configuration == expected)
         #expect((result.warning != nil) == values.2)
         #expect(!result.isReadOnly)
-        #expect(result.configuration.schemaVersion == 2)
+        #expect(result.configuration.schemaVersion == DockConfiguration.currentSchemaVersion)
         #expect(try Data(contentsOf: fixture.primary) == encoded)
 
         try await fixture.repository.save(result.configuration, revision: 1)
@@ -282,7 +317,7 @@ struct ConfigurationRepositoryTests {
         let migrated = result.configuration
         #expect(!result.isReadOnly)
         #expect(result.warning == nil)
-        #expect(migrated.schemaVersion == 2)
+        #expect(migrated.schemaVersion == DockConfiguration.currentSchemaVersion)
         #expect(migrated.order == [AppID(rawValue: "excluded"), AppID(rawValue: "pinned")])
         #expect(migrated.apps == [
             AppEntry(id: AppID(rawValue: "pinned"), name: "고정 앱", bundleIdentifier: "com.example.pinned", bundlePath: "/Applications/Pinned.app", bookmarkData: Data([1, 2, 3]), isPinned: true, lastSeen: Date(timeIntervalSince1970: 1_000)),
@@ -295,7 +330,7 @@ struct ConfigurationRepositoryTests {
         #expect(try Data(contentsOf: fixture.backup) == legacy)
         let saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture.primary)) as? [String: Any])
         let preferences = try #require(saved["preferences"] as? [String: Any])
-        #expect(saved["schemaVersion"] as? Int == 2)
+        #expect(saved["schemaVersion"] as? Int == DockConfiguration.currentSchemaVersion)
         #expect(preferences["slotWidth"] as? Double == 30)
         #expect(preferences["iconSpacing"] == nil)
         #expect(preferences["isCompact"] == nil)
@@ -344,7 +379,7 @@ struct ConfigurationRepositoryTests {
         #expect(try Data(contentsOf: fixture.backup) == legacy)
         #expect(try await ConfigurationRepository(directory: fixture.directory).load().configuration == expected)
         let saved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture.primary)) as? [String: Any])
-        #expect(saved["schemaVersion"] as? Int == 2)
+        #expect(saved["schemaVersion"] as? Int == DockConfiguration.currentSchemaVersion)
         let preserved = try #require(fixture.files().first { $0.lastPathComponent.contains(".corrupt-") })
         #expect(try Data(contentsOf: preserved) == corrupt)
     }
@@ -384,12 +419,12 @@ struct ConfigurationRepositoryTests {
         let fixture = try RepositoryFixture()
         defer { fixture.cleanUp() }
         let legacy = Data(#"{"schemaVersion":1,"preferences":{"iconSize":18,"iconSpacing":4}}"#.utf8)
-        let future = Data(#"{"schemaVersion":3,"preferences":"future"}"#.utf8)
+        let future = Data(#"{"schemaVersion":4,"preferences":"future"}"#.utf8)
         try legacy.write(to: fixture.primary)
         try future.write(to: fixture.backup)
         let result = try await fixture.repository.load()
         #expect(result.configuration == DockConfiguration(preferences: DockPreferences(slotWidth: 30)))
-        await #expect(throws: ConfigurationRepositoryError.futureSchema(3)) {
+        await #expect(throws: ConfigurationRepositoryError.futureSchema(4)) {
             try await fixture.repository.save(result.configuration, revision: 1)
         }
         #expect(try Data(contentsOf: fixture.primary) == legacy)

@@ -6,6 +6,7 @@ public struct DockPreferences: Codable, Equatable, Sendable {
     public var maxVisibleApps: Int
     public var showsRunningApps: Bool
     public var shortcutEnabled: Bool
+    /// 이전 Finder 전용 설정을 읽기 위한 호환 필드다. 현재 숨김 정책은 hiddenApps에 저장한다.
     public var hidesFinder: Bool
 
     public init(
@@ -45,7 +46,7 @@ public struct DockPreferences: Codable, Equatable, Sendable {
 }
 
 public struct DockConfiguration: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public var schemaVersion: Int
     public var apps: [AppEntry]
@@ -54,11 +55,12 @@ public struct DockConfiguration: Codable, Equatable, Sendable {
     /// 이전 저장 이름을 유지한다. 현재 의미는 실행 숨김이 아닌 Dock 자동 등록 억제 기록이다.
     public var removedApps: [AppEntry]
     public var knownSystemDockPaths: [String]
+    public var hiddenApps: [AppEntry]
 
     public init(
         schemaVersion: Int = Self.currentSchemaVersion, apps: [AppEntry] = [],
         order: [AppID] = [], preferences: DockPreferences = DockPreferences(),
-        removedApps: [AppEntry] = [], knownSystemDockPaths: [String] = []
+        removedApps: [AppEntry] = [], knownSystemDockPaths: [String] = [], hiddenApps: [AppEntry] = []
     ) {
         self.schemaVersion = schemaVersion
         self.apps = apps
@@ -66,11 +68,18 @@ public struct DockConfiguration: Codable, Equatable, Sendable {
         self.preferences = preferences
         self.removedApps = removedApps
         self.knownSystemDockPaths = knownSystemDockPaths
+        self.hiddenApps = hiddenApps
     }
 
     /// 잘못된 참조를 제거하되 저장된 사용자 순서를 우선하여 복원한다.
     public func normalized() -> Self {
         var copy = self
+        copy.migrateFinderVisibility()
+        var hidden: [AppEntry] = []
+        for app in copy.hiddenApps where !app.id.rawValue.isEmpty && !app.bundlePath.isEmpty {
+            if !hidden.contains(where: { $0.id == app.id || sameHiddenApplication($0, app) }) { hidden.append(app) }
+        }
+        copy.hiddenApps = hidden
         var removedIDs = Set<AppID>()
         copy.removedApps = removedApps.filter { !$0.id.rawValue.isEmpty && removedIDs.insert($0.id).inserted }
         let removedEntries = copy.removedApps
@@ -89,15 +98,26 @@ public struct DockConfiguration: Codable, Equatable, Sendable {
         for app in copy.apps where orderedIDs.insert(app.id).inserted {
             copy.order.append(app.id)
         }
-        copy.preferences = preferences.normalized()
+        copy.preferences = copy.preferences.normalized()
         var knownPaths = Set<String>()
         copy.knownSystemDockPaths = knownSystemDockPaths.filter { !$0.isEmpty }.map(installationPath)
             .filter { knownPaths.insert($0).inserted }
         return copy
     }
 
+    /// 이전 Finder 전용 설정은 별도 숨김 목록으로 옮기고 등록·순서는 그대로 둔다.
+    public mutating func migrateFinderVisibility() {
+        guard preferences.hidesFinder else { return }
+        let finder = apps.first { $0.bundleIdentifier == "com.apple.finder" } ?? AppEntry(
+            id: AppID(rawValue: "hidden.com.apple.finder"), name: "Finder", bundleIdentifier: "com.apple.finder",
+            bundlePath: "/System/Library/CoreServices/Finder.app", lastSeen: Date(timeIntervalSince1970: 0)
+        )
+        if !hiddenApps.contains(where: { sameHiddenApplication($0, finder) }) { hiddenApps.append(finder) }
+        preferences.hidesFinder = false
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, apps, order, preferences, removedApps, knownSystemDockPaths
+        case schemaVersion, apps, order, preferences, removedApps, knownSystemDockPaths, hiddenApps
         case hasImportedSystemDock
     }
 
@@ -108,6 +128,7 @@ public struct DockConfiguration: Codable, Equatable, Sendable {
         order = try values.decodeIfPresent([AppID].self, forKey: .order) ?? []
         preferences = try values.decodeIfPresent(DockPreferences.self, forKey: .preferences) ?? DockPreferences()
         removedApps = try values.decodeIfPresent([AppEntry].self, forKey: .removedApps) ?? []
+        hiddenApps = try values.decodeIfPresent([AppEntry].self, forKey: .hiddenApps) ?? []
         if let knownPaths = try values.decodeIfPresent([String].self, forKey: .knownSystemDockPaths) {
             knownSystemDockPaths = knownPaths
         } else {
@@ -125,6 +146,7 @@ public struct DockConfiguration: Codable, Equatable, Sendable {
         try values.encode(preferences, forKey: .preferences)
         try values.encode(removedApps, forKey: .removedApps)
         try values.encode(knownSystemDockPaths, forKey: .knownSystemDockPaths)
+        try values.encode(hiddenApps, forKey: .hiddenApps)
     }
 }
 
@@ -136,4 +158,12 @@ func sameInstallation(_ lhs: AppEntry, _ rhs: AppEntry) -> Bool {
           installationPath(lhs.bundlePath) == installationPath(rhs.bundlePath) else { return false }
     guard let left = lhs.bundleIdentifier, let right = rhs.bundleIdentifier else { return true }
     return left == right
+}
+
+/// 숨김은 앱의 설치 위치·관찰 ID가 바뀌어도 유지하며 이름이 같은 다른 앱에는 적용하지 않는다.
+func sameHiddenApplication(_ lhs: AppEntry, _ rhs: AppEntry) -> Bool {
+    if let left = lhs.bundleIdentifier, !left.isEmpty, let right = rhs.bundleIdentifier, !right.isEmpty {
+        return left == right
+    }
+    return sameInstallation(lhs, rhs)
 }

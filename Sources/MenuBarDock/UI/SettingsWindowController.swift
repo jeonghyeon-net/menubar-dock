@@ -10,20 +10,22 @@ final class SettingsWindowController: NSWindowController {
     private let noticeLabel = NSTextField(wrappingLabelWithString: "")
     private var subscription: AnyCancellable?
     private let applications: ApplicationsSettingsPage
+    private let hiddenApplications: HiddenApplicationsSettingsPage
     private let appearance: AppearanceSettingsPage
     private let shortcuts: ShortcutSettingsPage
 
     init(model: DockPresentationModel) {
         self.model = model
         applications = ApplicationsSettingsPage(model: model)
+        hiddenApplications = HiddenApplicationsSettingsPage(model: model)
         appearance = AppearanceSettingsPage(model: model)
         shortcuts = ShortcutSettingsPage(model: model)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 650),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
         )
         window.title = "Menu Bar Dock"
-        window.contentMinSize = NSSize(width: 520, height: 600)
+        window.contentMinSize = NSSize(width: 680, height: 650)
         window.setFrameAutosaveName("MenuBarDock.Settings.SingleWindow")
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -59,13 +61,19 @@ final class SettingsWindowController: NSWindowController {
         noticeLabel.maximumNumberOfLines = 3
         noticeView.addArrangedSubview(noticeLabel)
         noticeView.addArrangedSubview(toolbarButton("×", label: "알림 닫기") { [weak model] in model?.perform(.dismissNotice) })
-        for view in [noticeView, applications, separator(), appearance, separator(), shortcuts, HelpSettingsPage(model: model)] {
+        let lists = NSStackView(views: [applications, hiddenApplications])
+        lists.orientation = .horizontal
+        lists.alignment = .top
+        lists.spacing = 24
+        lists.distribution = .fillEqually
+        applications.heightAnchor.constraint(equalTo: hiddenApplications.heightAnchor).isActive = true
+        for view in [noticeView, lists, separator(), appearance, separator(), shortcuts, HelpSettingsPage(model: model)] {
             container.addArrangedSubview(view)
             view.translatesAutoresizingMaskIntoConstraints = false
             view.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -32).isActive = true
         }
-        applications.heightAnchor.constraint(greaterThanOrEqualToConstant: 198).isActive = true
-        applications.setContentHuggingPriority(.defaultLow, for: .vertical)
+        lists.heightAnchor.constraint(greaterThanOrEqualToConstant: 238).isActive = true
+        lists.setContentHuggingPriority(.defaultLow, for: .vertical)
     }
 
     private func refresh() {
@@ -73,6 +81,7 @@ final class SettingsWindowController: NSWindowController {
         noticeLabel.toolTip = model.notice
         noticeView.isHidden = model.notice == nil
         applications.refresh()
+        hiddenApplications.refresh()
         appearance.refresh()
         shortcuts.refresh()
     }
@@ -97,6 +106,7 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
     private let moreButton = NSPopUpButton(frame: .zero, pullsDown: true)
     private var displayedApps: [AppEntry] = []
     private var displayedReadOnly = false
+    private var displayedHiddenIDs: Set<AppID> = []
 
     init(model: DockPresentationModel) {
         self.model = model
@@ -120,12 +130,16 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
         content.alignment = .leading
         content.spacing = 8
         install(content, in: self)
+        addFullWidth(label("항상 표시할 앱", font: .systemFont(ofSize: 13, weight: .semibold)), to: content)
+        addFullWidth(label("종료한 뒤에도 표시합니다. 숨김 설정이 우선합니다.", secondary: true), to: content)
+        table.headerView = nil
         table.usesAlternatingRowBackgroundColors = false
         table.backgroundColor = .clear
         table.style = .plain
         table.rowHeight = 34
         table.intercellSpacing = NSSize(width: 8, height: 0)
         table.allowsMultipleSelection = false
+        table.autoresizingMask = [.width]
         table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         table.dataSource = self
         table.delegate = self
@@ -135,7 +149,7 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
         table.toolTip = "드래그하거나 화살표 버튼으로 순서를 바꾸세요. 두 번 클릭하면 앱을 엽니다."
         let appColumn = NSTableColumn(identifier: .init("app"))
         appColumn.title = "항상 표시할 앱"
-        appColumn.width = 480
+        appColumn.width = 300
         appColumn.minWidth = 220
         appColumn.resizingMask = .autoresizingMask
         table.addTableColumn(appColumn)
@@ -175,9 +189,10 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
     func refresh() {
         let selection = selectedApp?.id
         let previousRow = table.selectedRow
-        if displayedApps != model.apps || displayedReadOnly != model.isReadOnly {
+        if displayedApps != model.apps || displayedReadOnly != model.isReadOnly || displayedHiddenIDs != model.hiddenSavedAppIDs {
             displayedApps = model.apps
             displayedReadOnly = model.isReadOnly
+            displayedHiddenIDs = model.hiddenSavedAppIDs
             table.reloadData()
             if let selection, let row = displayedApps.firstIndex(where: { $0.id == selection }) {
                 table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
@@ -222,9 +237,20 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
             image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             image.widthAnchor.constraint(equalToConstant: 20), image.heightAnchor.constraint(equalToConstant: 20),
             name.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 8),
-            name.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
             name.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
+        if displayedHiddenIDs.contains(app.id) {
+            let hint = label("숨김", font: .systemFont(ofSize: 11), secondary: true)
+            hint.translatesAutoresizingMaskIntoConstraints = false
+            hint.setContentHuggingPriority(.required, for: .horizontal)
+            hint.setContentCompressionResistancePriority(.required, for: .horizontal)
+            cell.addSubview(hint)
+            NSLayoutConstraint.activate([
+                hint.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                hint.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                name.trailingAnchor.constraint(equalTo: hint.leadingAnchor, constant: -8),
+            ])
+        } else { name.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4).isActive = true }
         return cell
     }
 
@@ -271,11 +297,153 @@ private final class ApplicationsSettingsPage: NSView, NSTableViewDataSource, NST
     @objc private func removeSelected() { if let selectedApp { model.perform(.remove(selectedApp.id)) } }
 }
 
+/// 등록 목록과 별개로 숨김을 관리하고, 실행 중인 앱은 선택 메뉴에서 바로 추가한다.
+@MainActor
+private final class HiddenApplicationsSettingsPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
+    private let model: DockPresentationModel
+    private let table = NSTableView()
+    private let emptyLabel = label("숨긴 앱이 없습니다.", secondary: true)
+    private let addButton = NSPopUpButton(frame: .zero, pullsDown: true)
+    private let restoreButton = ActionButton(title: "숨김 해제", action: nil)
+    private var displayedApps: [AppEntry] = []
+    private var candidates: [AppEntry] = []
+
+    init(model: DockPresentationModel) {
+        self.model = model
+        super.init(frame: .zero)
+        let content = NSStackView()
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 8
+        install(content, in: self)
+        addFullWidth(label("숨길 앱", font: .systemFont(ofSize: 13, weight: .semibold)), to: content)
+        addFullWidth(label("메뉴 막대와 앱 전환 목록에서 숨깁니다.", secondary: true), to: content)
+        table.headerView = nil
+        table.style = .plain
+        table.backgroundColor = .clear
+        table.rowHeight = 34
+        table.intercellSpacing = NSSize(width: 8, height: 0)
+        table.allowsMultipleSelection = true
+        table.autoresizingMask = [.width]
+        table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        table.dataSource = self
+        table.delegate = self
+        table.setAccessibilityLabel("숨길 앱")
+        let column = NSTableColumn(identifier: .init("hidden-app"))
+        column.width = 300
+        column.minWidth = 180
+        table.addTableColumn(column)
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+        addFullWidth(scroll, to: content)
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
+        scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
+        addFullWidth(emptyLabel, to: content)
+        addButton.controlSize = .small
+        addButton.setAccessibilityLabel("앱 숨기기")
+        addButton.toolTip = "실행 중이거나 등록한 앱을 고르거나 다른 앱을 선택하세요."
+        restoreButton.controlSize = .small
+        restoreButton.setAccessibilityLabel("숨김 해제")
+        restoreButton.toolTip = "선택한 앱을 원래 등록 상태와 순서로 다시 표시합니다."
+        restoreButton.onAction = { [weak self] in self?.restoreSelected() }
+        addFullWidth(horizontal([addButton, NSView(), restoreButton]), to: content)
+        rebuildMenu()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func refresh() {
+        if displayedApps != model.hiddenApps {
+            let selectedIDs = Set(table.selectedRowIndexes.compactMap { displayedApps.indices.contains($0) ? displayedApps[$0].id : nil })
+            let previousRow = table.selectedRow
+            displayedApps = model.hiddenApps
+            table.reloadData()
+            let selection = IndexSet(displayedApps.indices.filter { selectedIDs.contains(displayedApps[$0].id) })
+            if !selection.isEmpty {
+                table.selectRowIndexes(selection, byExtendingSelection: false)
+            } else if previousRow >= 0, !displayedApps.isEmpty {
+                table.selectRowIndexes(IndexSet(integer: min(previousRow, displayedApps.count - 1)), byExtendingSelection: false)
+            } else { table.deselectAll(nil) }
+        }
+        if candidates != model.hideableApps {
+            candidates = model.hideableApps
+            rebuildMenu()
+        }
+        emptyLabel.isHidden = !displayedApps.isEmpty
+        addButton.isEnabled = !model.isReadOnly
+        addButton.menu?.items.dropFirst().forEach { $0.isEnabled = !model.isReadOnly }
+        updateSelectionControls()
+    }
+
+    private func rebuildMenu() {
+        addButton.removeAllItems()
+        addButton.addItem(withTitle: "앱 숨기기…")
+        addButton.menu?.autoenablesItems = false
+        for (index, app) in candidates.enumerated() {
+            let item = NSMenuItem(title: app.name, action: #selector(hideCandidate(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            let icon = model.imageForApp(app).copy() as? NSImage
+            icon?.size = NSSize(width: 18, height: 18)
+            item.image = icon
+            addButton.menu?.addItem(item)
+        }
+        if !candidates.isEmpty { addButton.menu?.addItem(.separator()) }
+        let choose = NSMenuItem(title: "다른 앱 선택…", action: #selector(chooseApplications), keyEquivalent: "")
+        choose.target = self
+        addButton.menu?.addItem(choose)
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { displayedApps.count }
+
+    func tableView(_ tableView: NSTableView, viewFor column: NSTableColumn?, row: Int) -> NSView? {
+        guard displayedApps.indices.contains(row) else { return nil }
+        let app = displayedApps[row]
+        let image = NSImageView(image: model.imageForApp(app))
+        image.imageScaling = .scaleProportionallyUpOrDown
+        image.setAccessibilityElement(false)
+        image.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        image.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        let name = label(app.name, font: .systemFont(ofSize: 13))
+        name.lineBreakMode = .byTruncatingTail
+        name.maximumNumberOfLines = 1
+        let cell = horizontal([image, name])
+        cell.toolTip = app.bundlePath
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) { updateSelectionControls() }
+
+    private func updateSelectionControls() {
+        restoreButton.isEnabled = !model.isReadOnly && !table.selectedRowIndexes.isEmpty
+    }
+
+    private func restoreSelected() {
+        guard !model.isReadOnly else { return }
+        let selected = table.selectedRowIndexes.compactMap { displayedApps.indices.contains($0) ? displayedApps[$0].id : nil }
+        for id in selected { model.perform(.restoreHiddenApp(id)) }
+    }
+
+    @objc private func hideCandidate(_ sender: NSMenuItem) {
+        guard !model.isReadOnly, candidates.indices.contains(sender.tag) else { return }
+        model.perform(.hideFromDock(candidates[sender.tag]))
+    }
+
+    @objc private func chooseApplications() {
+        guard !model.isReadOnly else { return }
+        model.perform(.chooseHiddenApps)
+    }
+}
+
 @MainActor
 private final class AppearanceSettingsPage: NSView {
     private let model: DockPresentationModel
     private let running = ActionCheckbox(title: "실행 중인 앱 자동 표시", action: nil)
-    private let hideFinder = ActionCheckbox(title: "Finder 숨기기", action: nil)
     private let login = ActionCheckbox(title: "로그인할 때 시작", action: nil)
     private let iconSlider = TrackingPreferenceSlider(value: 24, minValue: 16, maxValue: 32, target: nil, action: nil)
     private let spacingSlider = TrackingPreferenceSlider(value: 0, minValue: 0, maxValue: 28, target: nil, action: nil)
@@ -289,14 +457,12 @@ private final class AppearanceSettingsPage: NSView {
         self.model = model
         super.init(frame: .zero)
         running.onChange = { [weak self] value in self?.update(\.showsRunningApps, value) }
-        hideFinder.onChange = { [weak self] value in self?.update(\.hidesFinder, value) }
         login.onChange = { [weak model] value in model?.perform(.login(value)) }
         reset.onAction = { [weak self] in self?.resetIconLayout() }
         reset.controlSize = .small
         reset.setAccessibilityLabel("아이콘 크기 및 간격 기본값")
         reset.toolTip = "아이콘 크기와 간격만 기본값으로 되돌립니다."
         running.toolTip = "목록에 없는 실행 중인 앱을 앞쪽에 표시합니다."
-        hideFinder.toolTip = "메뉴 막대와 기본 앱 전환 목록에서 Finder를 숨깁니다. 앱 검색에서는 계속 찾을 수 있습니다."
         iconSlider.target = self
         iconSlider.action = #selector(changeIconSize)
         iconSlider.controlSize = .small
@@ -328,7 +494,6 @@ private final class AppearanceSettingsPage: NSView {
         countRow.addArrangedSubview(reset)
         addFullWidth(countRow, to: content)
         addFullWidth(formRow("앱 목록", control: running), to: content)
-        addFullWidth(formRow("", control: hideFinder), to: content)
         addFullWidth(formRow("시작", control: login), to: content)
         addFullWidth(formRow("", control: loginLabel), to: content)
     }
@@ -345,7 +510,6 @@ private final class AppearanceSettingsPage: NSView {
     func refresh() {
         let preferences = model.preferences
         running.state = preferences.showsRunningApps ? .on : .off
-        hideFinder.state = preferences.hidesFinder ? .on : .off
         login.state = model.loginEnabled ? .on : .off
         iconSlider.synchronize(value: preferences.iconSize)
         spacingSlider.synchronize(value: max(0, preferences.slotWidth - preferences.iconSize))
@@ -357,7 +521,6 @@ private final class AppearanceSettingsPage: NSView {
         // 체크 상태와 중복되는 정상 안내는 생략하고 설치·승인 오류는 그대로 보여 준다.
         loginLabel.superview?.isHidden = !hasLoginNotice
         running.isEnabled = !model.isReadOnly
-        hideFinder.isEnabled = !model.isReadOnly
         iconSlider.isEnabled = !model.isReadOnly
         spacingSlider.isEnabled = iconSlider.isEnabled
         count.isEnabled = iconSlider.isEnabled

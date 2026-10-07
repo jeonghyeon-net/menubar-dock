@@ -86,6 +86,9 @@ final class ApplicationController {
         for app in catalog.configuration.removedApps {
             if let refreshed = refreshedByID[app.id] ?? resolver.refresh(app) { catalog.refreshRemovedApp(refreshed) }
         }
+        for app in catalog.configuration.hiddenApps {
+            if let refreshed = resolver.refresh(app) { catalog.refreshHiddenApp(refreshed) }
+        }
         do { try systemDockMonitor?.start { [weak self] in self?.synchronizeSystemDock() } }
         catch { presentation.notice = "Dock 변경 감지를 시작하지 못했습니다. 앱을 다시 실행해 주세요." }
         synchronizeSystemDock()
@@ -138,9 +141,18 @@ final class ApplicationController {
     }
 
     private func publish() {
-        let items = catalog.visibleItems(runningIDs: runningIDs)
+        let running = runningIDs
+        let items = catalog.visibleItems(runningIDs: running)
         if presentation.items != items { presentation.items = items }
         if presentation.apps != catalog.savedApps { presentation.apps = catalog.savedApps }
+        if presentation.hiddenApps != catalog.configuration.hiddenApps { presentation.hiddenApps = catalog.configuration.hiddenApps }
+        let hiddenSavedIDs = Set(catalog.savedApps.filter { catalog.isHidden($0) }.map(\.id))
+        if presentation.hiddenSavedAppIDs != hiddenSavedIDs { presentation.hiddenSavedAppIDs = hiddenSavedIDs }
+        let candidates = catalog.orderedApps.filter { ($0.isPinned || running.contains($0.id)) && !catalog.isHidden($0) }
+        var seen = Set<String>()
+        let hideable = candidates.filter { seen.insert($0.bundleIdentifier ?? $0.bundlePath).inserted }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        if presentation.hideableApps != hideable { presentation.hideableApps = hideable }
         if presentation.preferences != catalog.configuration.preferences {
             presentation.preferences = catalog.configuration.preferences
         }
@@ -194,6 +206,9 @@ final class ApplicationController {
         case .remove(let id): mutate { $0.remove(id) }
         case .move(let offsets, let destination): mutate { $0.moveSaved(fromOffsets: offsets, toOffset: destination) }
         case .preferences(let value): mutate { $0.updatePreferences(value) }
+        case .hideFromDock(let app): mutate { $0.hideApp(app) }
+        case .restoreHiddenApp(let id): mutate { $0.restoreHiddenApp(id) }
+        case .chooseHiddenApps: chooseApplications(replacing: nil, hiding: true)
         case .addApps: chooseApplications(replacing: nil)
         case .replaceApp(let id): chooseApplications(replacing: id)
         case .login(let enabled):
@@ -268,11 +283,11 @@ final class ApplicationController {
         }
     }
 
-    private func chooseApplications(replacing id: AppID?) {
+    private func chooseApplications(replacing id: AppID?, hiding: Bool = false) {
         guard !isReadOnly else { return }
         let panel = NSOpenPanel()
-        panel.title = id == nil ? "메뉴 막대에 추가할 앱 선택" : "앱 위치 다시 지정"
-        panel.prompt = id == nil ? "추가" : "선택"
+        panel.title = hiding ? "숨길 앱 선택" : id == nil ? "메뉴 막대에 추가할 앱 선택" : "앱 위치 다시 지정"
+        panel.prompt = hiding ? "숨기기" : id == nil ? "추가" : "선택"
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = id == nil
@@ -284,6 +299,10 @@ final class ApplicationController {
             for url in panel.urls {
                 do {
                     let app = try self.resolver.resolve(url: url)
+                    if hiding {
+                        self.mutate { $0.hideApp(app) }
+                        continue
+                    }
                     // 등록 검증을 마친 값만 반영해 충돌 실패가 기존 목록을 일부 변경하지 않게 한다.
                     var registered = self.catalog
                     try SavedAppRegistrar.register(

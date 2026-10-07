@@ -18,8 +18,38 @@ struct SettingsAppearanceTests {
         #expect(views.contains { ($0 as? NSSlider)?.accessibilityLabel() == "아이콘 크기" })
         #expect(views.contains { ($0 as? NSSlider)?.accessibilityLabel() == "아이콘 간격" })
         #expect(views.contains { ($0 as? NSButton)?.accessibilityLabel() == "다음 앱 단축키 변경" })
-        #expect(views.contains { ($0 as? NSButton)?.title == "Finder 숨기기" })
+        #expect(views.contains { ($0 as? NSTableView)?.accessibilityLabel() == "숨길 앱" })
         #expect(!views.contains { ($0 as? NSButton)?.title == "Dock 가져오기" })
+    }
+
+    @Test func savedAndHiddenRowsRemainVisibleAtMinimumWindowSize() throws {
+        let fixture = AppearanceFixture()
+        let app = AppEntry(id: AppID(rawValue: "hidden-row"), name: "이름이 아주 긴 등록 앱", bundlePath: "/fixture/Hidden.app")
+        fixture.model.apps = [app]
+        fixture.model.hiddenApps = [app]
+        fixture.model.hiddenSavedAppIDs = [app.id]
+        defer { fixture.settings.close() }
+        fixture.settings.show()
+        let window = try #require(fixture.settings.window)
+        window.setContentSize(window.contentMinSize)
+        let content = try #require(window.contentView)
+        content.layoutSubtreeIfNeeded()
+        let tables = appearanceDescendants(of: content).compactMap { $0 as? NSTableView }
+        #expect(tables.count == 2)
+        for table in tables {
+            let scroll = try #require(table.enclosingScrollView)
+            let cell = try #require(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+            #expect(cell.frame.maxX <= scroll.contentView.bounds.width)
+            #expect(cell.frame.height >= 20)
+        }
+        let saved = try #require(tables.first { $0.accessibilityLabel() == "항상 표시할 앱" })
+        let cell = try #require(saved.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        let hiddenHint = try #require(appearanceDescendants(of: cell).compactMap { $0 as? NSTextField }.first { $0.stringValue == "숨김" })
+        #expect(cell.bounds.contains(hiddenHint.frame))
+        let left = saved.convert(saved.bounds, to: content)
+        let hidden = try #require(tables.first { $0.accessibilityLabel() == "숨길 앱" })
+        let right = hidden.convert(hidden.bounds, to: content)
+        #expect(left.maxX < right.minX)
     }
 
     @Test func restoringIconLayoutPreservesTheOtherPreferences() async throws {
@@ -47,33 +77,39 @@ struct SettingsAppearanceTests {
         #expect(values.contains("0pt"))
     }
 
-    @Test func finderCheckboxPublishesPreferencesAndReflectsExternalChanges() async throws {
-        let original = DockPreferences(iconSize: 20, slotWidth: 25, maxVisibleApps: 9)
-        let fixture = AppearanceFixture(preferences: original)
+    @Test func hiddenAppMenuAndRestoreControlsHandleMultipleAppsAndReadOnlyState() async throws {
+        let fixture = AppearanceFixture()
+        let entries = (1...3).map { AppEntry(id: AppID(rawValue: "hide-\($0)"), name: "앱 \($0)", bundlePath: "/fixture/\($0).app") }
+        fixture.model.hideableApps = entries
         defer { fixture.settings.close() }
         fixture.settings.show()
-        let controls = appearanceDescendants(of: fixture.settings.window?.contentView).compactMap { $0 as? NSButton }
-        let checkbox = try #require(controls.first { $0.title == "Finder 숨기기" })
-        let action = try #require(checkbox.action)
-        #expect(checkbox.state == .off)
-        // Swift Testing의 async 실행 안에 AppKit 추적 루프를 중첩하지 않고 체크 결과를 전달한다.
-        checkbox.state = .on
-        #expect(checkbox.sendAction(action, to: checkbox.target))
-        var hidden = original
-        hidden.hidesFinder = true
-        #expect(fixture.changes == [hidden])
-        #expect(fixture.model.preferences == hidden)
-        #expect(checkbox.state == .on)
-        checkbox.state = .off
-        #expect(checkbox.sendAction(action, to: checkbox.target))
-        #expect(fixture.changes == [hidden, original])
-        #expect(fixture.model.preferences == original)
-        fixture.model.preferences = hidden
+        let views = appearanceDescendants(of: fixture.settings.window?.contentView)
+        let menuButton = try #require(views.compactMap { $0 as? NSPopUpButton }.first { $0.accessibilityLabel() == "앱 숨기기" })
+        let table = try #require(views.compactMap { $0 as? NSTableView }.first { $0.accessibilityLabel() == "숨길 앱" })
+        let restore = try #require(views.compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "숨김 해제" })
+        #expect(!restore.isEnabled)
+        for entry in entries.prefix(2) {
+            let item = try #require(menuButton.item(withTitle: entry.name))
+            #expect(NSApp.sendAction(try #require(item.action), to: item.target, from: item))
+            await Task.yield()
+            await Task.yield()
+        }
+        #expect(table.numberOfRows == 2)
+        #expect(fixture.model.hiddenApps == Array(entries.prefix(2)))
+        table.selectRowIndexes(IndexSet(integersIn: 0..<2), byExtendingSelection: false)
+        #expect(restore.isEnabled)
+        #expect(restore.sendAction(try #require(restore.action), to: restore.target))
+        await Task.yield()
+        await Task.yield()
+        #expect(table.numberOfRows == 0)
+        #expect(!restore.isEnabled)
+        fixture.model.hiddenApps = entries
         fixture.model.isReadOnly = true
         await Task.yield()
         await Task.yield()
-        #expect(checkbox.state == .on)
-        #expect(!checkbox.isEnabled)
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        #expect(!menuButton.isEnabled)
+        #expect(!restore.isEnabled)
     }
 
     @Test func changingIconSizePreservesSpacingAndSpacingCanReachZero() async throws {
@@ -151,6 +187,11 @@ private final class AppearanceFixture {
         case let .preferences(preferences):
             changes.append(preferences)
             model.preferences = preferences.normalized()
+        case let .hideFromDock(app):
+            model.hiddenApps.append(app)
+            model.hideableApps.removeAll { $0.id == app.id }
+        case let .restoreHiddenApp(id):
+            model.hiddenApps.removeAll { $0.id == id }
         case let .remove(id):
             removedIDs.append(id)
             model.apps.removeAll { $0.id == id }

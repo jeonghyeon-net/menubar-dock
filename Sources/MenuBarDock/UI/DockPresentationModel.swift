@@ -12,6 +12,9 @@ enum DockUIAction {
     case remove(AppID)
     case move(IndexSet, Int)
     case preferences(DockPreferences)
+    case hideFromDock(AppEntry)
+    case restoreHiddenApp(AppID)
+    case chooseHiddenApps
     case addApps
     case replaceApp(AppID)
     case login(Bool)
@@ -34,6 +37,9 @@ enum DockUIAction {
 final class DockPresentationModel: ObservableObject {
     @Published var items: [DockItem] = []
     @Published var apps: [AppEntry] = []
+    @Published var hiddenApps: [AppEntry] = []
+    @Published var hiddenSavedAppIDs: Set<AppID> = []
+    @Published var hideableApps: [AppEntry] = []
     @Published var preferences = DockPreferences()
     @Published var loginEnabled = false
     @Published var loginStatus = ""

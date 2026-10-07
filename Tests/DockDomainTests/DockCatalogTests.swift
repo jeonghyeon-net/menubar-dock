@@ -25,16 +25,13 @@ struct DockCatalogTests {
         let running: Set<AppID> = [finder.id]
         let originalVisible = catalog.visibleItems(runningIDs: running)
         let saved = catalog.savedApps
-        var preferences = original.preferences
-        preferences.hidesFinder = true
-        catalog.updatePreferences(preferences)
+        catalog.hideApp(finder)
         #expect(catalog.visibleItems(runningIDs: running) == originalVisible.filter { $0.id != finder.id })
         #expect(catalog.savedApps == saved)
         #expect(catalog.configuration.apps == original.apps)
         #expect(catalog.configuration.order == original.order)
         #expect(catalog.configuration.removedApps.isEmpty)
-        preferences.hidesFinder = false
-        catalog.updatePreferences(preferences)
+        catalog.restoreHiddenApp(finder.id)
         #expect(catalog.visibleItems(runningIDs: running) == originalVisible)
         #expect(catalog.configuration == original)
     }
